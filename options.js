@@ -96,6 +96,13 @@ const LISTS = {
       ['description', 'Role description', 'textarea'],
     ],
   },
+  languages: {
+    title: 'Languages', item: 'Language', add: 'Add language',
+    fields: [
+      ['language', 'Language'],
+      ['proficiency', 'Proficiency', ['', 'Beginner', 'Intermediate', 'Advanced', 'Fluent', 'Native']],
+    ],
+  },
   education: {
     title: 'Education', add: 'Add school',
     fields: [
@@ -106,7 +113,7 @@ const LISTS = {
     ],
   },
 };
-const lists = { workExperience: [], education: [] };
+const lists = { workExperience: [], education: [], languages: [] };
 
 function renderList(name) {
   const cfg = LISTS[name];
@@ -115,7 +122,7 @@ function renderList(name) {
   lists[name].forEach((entry, idx) => {
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend');
-    lg.textContent = `${cfg.title.split(' (')[0]} ${idx + 1}`;
+    lg.textContent = `${cfg.item || cfg.title.split(' (')[0]} ${idx + 1}`;
     fs.append(lg);
     const g = document.createElement('div'); g.className = 'grid';
     for (const [key, label, kind] of cfg.fields) {

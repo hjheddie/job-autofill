@@ -24,6 +24,9 @@ Create, duplicate, rename and delete profiles on the options page (e.g. one per 
 ## Skills
 Add skills (comma or line separated) to a profile. Plain "Skills" text boxes get them as a comma-separated list; search-and-pick boxes (Workday) get each skill typed and the matching suggestion chosen. Skills the site doesn't offer are listed under "Needs your attention".
 
+## Languages
+Add languages with a proficiency (Beginner to Native). "Language N" blocks (Workday) are filled one per entry, ticking "I am fluent" for Fluent/Native or setting each proficiency rating otherwise, and clicking **Add Another** as needed. A plain "Languages" text box gets `English (Native), Spanish (Intermediate)`; a single-choice "Preferred language" gets your first language. Programming-language boxes are ignored.
+
 ## Work experience and education
 Saved in the profile as repeatable blocks. On pages with "Work Experience N" / "Education N" headings (Workday "My Experience") the filler matches entries to blocks in order, clicks **Add Another** when the page has fewer blocks than you have entries, fills dates as MM / YYYY, ticks "I currently work here", and maps degree to the closest dropdown option.
 

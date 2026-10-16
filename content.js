@@ -45,6 +45,7 @@
     ['gpa', /\bgpa\b|grade point|overall result/, 60],
     ['major', /major|field of study|discipline/, 60],
     ['skills', /\bskills?\b/],
+    ['languages', /^(?!.*(programming|coding|markup)).*\blanguages?\b/],
     ['salary', /salary|compensation/],
     ['city', /\bcity\b/, 40],
     ['state', /\bstate\b|province/, 40],
@@ -141,6 +142,8 @@
     switch (key) {
       case 'fullName': return [p.firstName, p.lastName].filter(Boolean).join(' ');
       case 'skills': return skillsList(p).join(', ');
+      case 'languages': return (p.languages || []).filter((l) => l.language)
+        .map((l) => (l.proficiency ? `${l.language} (${l.proficiency})` : l.language)).join(', ');
       case 'phoneExt': case 'secondLastName': return '';
       case 'middleName': return p.middleName || '';
       case 'furnish': // "Do you wish to furnish this information?": No unless some EEO answer was given
@@ -189,6 +192,14 @@
         if (no) out.unshift('No, I do not have a disability', 'No, I do not have a disability and have not had one');
         if (yes) out.unshift('Yes, I have a disability', 'Yes, I have a disability, or have had one');
       }
+    } else if (key === 'proficiency') {
+      const alts = [
+        [/native|fluent/i, ['Fluent', 'Native', 'Expert', 'Advanced']],
+        [/advanced/i, ['Advanced', 'Fluent', 'Proficient']],
+        [/intermediate/i, ['Intermediate', 'Proficient', 'Conversational']],
+        [/beginner/i, ['Beginner', 'Basic', 'Elementary', 'Novice']],
+      ];
+      for (const [re, list] of alts) if (re.test(a)) { out.push(...list); break; }
     } else if (key === 'race') {
       const alts = [
         [/american indian/i, ['American Indian/Alaskan Native', 'American Indian', 'Alaskan Native']],
@@ -338,8 +349,9 @@
 
   // ---- Repeating sections: "Work Experience 1", "Education 1", … (Workday "My Experience") ----
   const KINDS = {
-    work: { heading: /^work experience \d+$/, other: /^education \d+$/, list: 'workExperience', minControls: 5 },
-    edu: { heading: /^education \d+$/, other: /^work experience \d+$/, list: 'education', minControls: 4 },
+    work: { heading: /^work experience \d+$/, other: /^(education|language) \d+$/, list: 'workExperience', minControls: 5 },
+    edu: { heading: /^education \d+$/, other: /^(work experience|language) \d+$/, list: 'education', minControls: 4 },
+    lang: { heading: /^language \d+$/, other: /^(work experience|education) \d+$/, list: 'languages', minControls: 2 },
   };
   const CONTROLS = 'input, select, textarea, button[aria-haspopup=listbox]';
 
@@ -359,8 +371,8 @@
     return roots;
   }
 
-  function sectionFields(root) {
-    const f = { months: [], years: [] };
+  function sectionFields(root, isLang) {
+    const f = { months: [], years: [], prof: [] };
     const textRules = [
       ['title', /job title|^title$/], ['company', /company|employer/], ['location', /location/],
       ['description', /description|responsib/], ['school', /school|universit|college/],
@@ -369,12 +381,19 @@
     for (const el of root.querySelectorAll(CONTROLS)) {
       const type = (el.type || '').toLowerCase();
       if ((el.tagName === 'INPUT' && ['hidden', 'submit', 'button', 'file', 'radio'].includes(type)) || el.disabled) continue;
-      if (type === 'checkbox') { if (/currently|current/.test(labelText(el))) f.current = el; continue; }
+      if (type === 'checkbox') {
+        const t = labelText(el);
+        if (/fluent/.test(t)) f.fluent = el;
+        else if (/currently|current/.test(t)) f.current = el;
+        continue;
+      }
       const own = norm([el.id, el.name, el.getAttribute('data-automation-id'), el.getAttribute('aria-label'), el.placeholder]
         .filter(Boolean).join(' ').replace(/[_\-[\]]/g, ' '));
       if (/month|\bmm\b/.test(own)) { f.months.push(el); continue; }
       if (/year|yyyy/.test(own)) { f.years.push(el); continue; }
       const label = labelText(el);
+      if (isLang && /comprehension|overall|reading|speaking|writing/.test(label) && !/result/.test(label)) { f.prof.push(el); continue; }
+      if (isLang && !f.language && /\blanguage\b/.test(`${label} ${own}`)) { f.language = el; continue; }
       const hay = `${label} ${own}`;
       const hit = textRules.find(([k, re]) => !f[k] && re.test(hay));
       if (hit) f[hit[0]] = el;
@@ -474,6 +493,25 @@
       && (root.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
   }
 
+  // One "Language N" block: the language, then either "I am fluent" or each proficiency rating.
+  async function fillLanguage(f, e, i, filled) {
+    const done = (el, what) => { mark(el); filled.push({ label: `Language ${i + 1}: ${what}`, key: 'language' }); };
+    if (f.language && e.language && (isListboxEl(f.language) || f.language instanceof HTMLSelectElement || !f.language.value)) {
+      if (await setControl(f.language, e.language, 'language')) done(f.language, 'language');
+    }
+    const fluent = /^(fluent|native)$/i.test(e.proficiency || '');
+    if (fluent && f.fluent) {
+      if (!f.fluent.checked) f.fluent.click();
+      done(f.fluent, 'fluent');
+      return;
+    }
+    if (!e.proficiency) return;
+    for (const el of f.prof) {
+      if (el instanceof HTMLSelectElement ? el.selectedIndex > 0 : (isListboxEl(el) ? !isEmptyChoice(txt(el)) : el.value)) continue;
+      if (await setControl(el, e.proficiency, 'proficiency')) done(el, 'proficiency');
+    }
+  }
+
   async function fillSections(p, filled, covered) {
     for (const [name, kind] of Object.entries(KINDS)) {
       const entries = p[kind.list] || [];
@@ -491,7 +529,8 @@
         covered.push(roots[i]);
         const e = entries[i];
         if (!e) continue;
-        const f = sectionFields(roots[i]);
+        const f = sectionFields(roots[i], name === 'lang');
+        if (name === 'lang') { await fillLanguage(f, e, i, filled); continue; }
         const mm = (v) => (v ? String(v).padStart(2, '0') : '');
         const plan = name === 'work'
           ? [['title', e.title], ['company', e.company], ['location', e.location], ['description', e.description],
@@ -584,6 +623,7 @@
         }
         let answer = customAnswer(label, p);
         if (answer == null && key) answer = valueFor(key, p);
+      if (key === 'languages' && (isSelect || isListbox || isCombo)) answer = (p.languages || [])[0]?.language || '';
         if (!answer) {
           const quiet = ['phoneExt', 'secondLastName', 'middleName'].includes(key) || /^if (yes|so|you)\b/.test(label);
           if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${key ? `no "${key}" saved in your profile` : 'field not recognized'}`);
