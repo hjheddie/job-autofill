@@ -475,84 +475,93 @@
     const unmatched = [];
     const covered = [];
     await fillSections(p, filled, covered);
-    const els = collect(document, []).filter((el) => !covered.some((r) => r.contains(el)));
-    const radios = new Map();
+    const seen = new WeakSet();
+    async function pass() {
+      const els = collect(document, []).filter((el) => !seen.has(el) && !covered.some((r) => r.contains(el)));
+      els.forEach((el) => seen.add(el));
+      const radios = new Map();
 
-    for (const el of els) {
-      const isListbox = el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA';
-      const type = isListbox ? 'listbox' : (el.type || '').toLowerCase();
-      if (SKIP_TYPES.has(type) || el.disabled || el.readOnly) continue;
-      if (type === 'checkbox') continue;
-      if (type === 'radio') {
-        const k = (el.name || '') + '|' + (el.form ? [...document.forms].indexOf(el.form) : '');
-        if (!radios.has(k)) radios.set(k, []);
-        radios.get(k).push(el);
-        continue;
-      }
-      if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
-      let label = labelText(el);
-      if (/^search\b/.test(label)) continue;
-      if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
-
-      if (type === 'file') {
-        // Workday's hidden file input has no label of its own, so also read the surrounding block.
-        const near = norm(txt(el.closest('[data-automation-id^="formField"], section, fieldset') || el.parentElement || el).slice(0, 200));
-        const isResume = /resume|cv|curriculum/.test(`${label} ${el.name} ${el.id} ${near}`) && !/cover letter/.test(`${label} ${near}`);
-        if (isResume && p.resume && !el.files.length) {
-          const dt = new DataTransfer();
-          dt.items.add(b64ToFile(p.resume));
-          el.files = dt.files;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          filled.push({ label: 'Resume', key: 'resume' });
+      for (const el of els) {
+        const isListbox = el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA';
+        const type = isListbox ? 'listbox' : (el.type || '').toLowerCase();
+        if (SKIP_TYPES.has(type) || el.disabled || el.readOnly) continue;
+        if (type === 'checkbox') continue;
+        if (type === 'radio') {
+          const k = (el.name || '') + '|' + (el.form ? [...document.forms].indexOf(el.form) : '');
+          if (!radios.has(k)) radios.set(k, []);
+          radios.get(k).push(el);
+          continue;
         }
-        continue;
+        if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
+        let label = labelText(el);
+        if (/^search\b/.test(label)) continue;
+        if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
+
+        if (type === 'file') {
+          // Workday's hidden file input has no label of its own, so also read the surrounding block.
+          const near = norm(txt(el.closest('[data-automation-id^="formField"], section, fieldset') || el.parentElement || el).slice(0, 200));
+          const isResume = /resume|cv|curriculum/.test(`${label} ${el.name} ${el.id} ${near}`) && !/cover letter/.test(`${label} ${near}`);
+          if (isResume && p.resume && !el.files.length) {
+            const dt = new DataTransfer();
+            dt.items.add(b64ToFile(p.resume));
+            el.files = dt.files;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            filled.push({ label: 'Resume', key: 'resume' });
+          }
+          continue;
+        }
+
+        const isSelect = el instanceof HTMLSelectElement;
+        const isCombo = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list';
+        // Multi-select search widgets already holding a chip (e.g. Country Phone Code).
+        const wrapEl = el.closest('[data-automation-id^="formField"]');
+        if (wrapEl && wrapEl.querySelector('[data-automation-id*="selectedItem" i]')) continue;
+        if (isListbox) { if (!isEmptyChoice(txt(el))) continue; }
+        else if (!isSelect && !isCombo && el.value) continue; // never overwrite
+        if (isSelect && el.selectedIndex > 0) continue;
+
+        let key = classify(el, label);
+        if (!key && isSelect) {
+          const opts = norm([...el.options].map((o) => o.text).join(' '));
+          key = (RULES.find(([k, re]) => OPTION_RULES.includes(k) && re.test(opts)) || [])[0] || null;
+        }
+        let answer = customAnswer(label, p);
+        if (answer == null && key) answer = valueFor(key, p);
+        if (!answer) {
+          const quiet = ['phoneExt', 'secondLastName', 'middleName'].includes(key) || /^if (yes|so|you)\b/.test(label);
+          if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${key ? `no "${key}" saved in your profile` : 'field not recognized'}`);
+          continue;
+        }
+        const answers = variants(key, answer);
+
+        let ok = false;
+        if (isListbox) ok = await fillListbox(el, answers);
+        else if (isSelect) ok = fillSelect(el, answers);
+        else if (isCombo) ok = await fillCombobox(el, answers);
+        else { setNative(el, answer); ok = true; }
+
+        if (ok) { mark(el); filled.push({ label: label.slice(0, 60), key: key || 'custom' }); }
+        else unmatched.push(`${label.slice(0, 70)} — no option matches "${answers[0]}"${answers[0] === 'Decline' ? ' (this list has no decline choice; pick one yourself)' : ''}`);
       }
 
-      const isSelect = el instanceof HTMLSelectElement;
-      const isCombo = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list';
-      // Multi-select search widgets already holding a chip (e.g. Country Phone Code).
-      const wrapEl = el.closest('[data-automation-id^="formField"]');
-      if (wrapEl && wrapEl.querySelector('[data-automation-id*="selectedItem" i]')) continue;
-      if (isListbox) { if (!isEmptyChoice(txt(el))) continue; }
-      else if (!isSelect && !isCombo && el.value) continue; // never overwrite
-      if (isSelect && el.selectedIndex > 0) continue;
-
-      let key = classify(el, label);
-      if (!key && isSelect) {
-        const opts = norm([...el.options].map((o) => o.text).join(' '));
-        key = (RULES.find(([k, re]) => OPTION_RULES.includes(k) && re.test(opts)) || [])[0] || null;
+      for (const group of radios.values()) {
+        const q = questionText(group);
+        const key = classify(group[0], q);
+        const answer = customAnswer(q, p) ?? (key ? valueFor(key, p) : '');
+        if (!answer) { unmatched.push(q.slice(0, 80)); continue; }
+        const texts = group.map((r) => labelText(r) || r.value);
+        const i = pickAny(texts, variants(key, answer));
+        if (i < 0 || group.some((r) => r.checked)) continue;
+        group[i].click();
+        filled.push({ label: q.slice(0, 60), key: key || 'custom' });
       }
-      let answer = customAnswer(label, p);
-      if (answer == null && key) answer = valueFor(key, p);
-      if (!answer) {
-        const quiet = ['phoneExt', 'secondLastName', 'middleName'].includes(key) || /^if (yes|so|you)\b/.test(label);
-        if (label && !quiet) unmatched.push(label.slice(0, 80));
-        continue;
-      }
-      const answers = variants(key, answer);
 
-      let ok = false;
-      if (isListbox) ok = await fillListbox(el, answers);
-      else if (isSelect) ok = fillSelect(el, answers);
-      else if (isCombo) ok = await fillCombobox(el, answers);
-      else { setNative(el, answer); ok = true; }
-
-      if (ok) { mark(el); filled.push({ label: label.slice(0, 60), key: key || 'custom' }); }
-      else unmatched.push(label.slice(0, 80));
     }
 
-    for (const group of radios.values()) {
-      const q = questionText(group);
-      const key = classify(group[0], q);
-      const answer = customAnswer(q, p) ?? (key ? valueFor(key, p) : '');
-      if (!answer) { unmatched.push(q.slice(0, 80)); continue; }
-      const texts = group.map((r) => labelText(r) || r.value);
-      const i = pickAny(texts, variants(key, answer));
-      if (i < 0 || group.some((r) => r.checked)) continue;
-      group[i].click();
-      filled.push({ label: q.slice(0, 60), key: key || 'custom' });
-    }
+    await pass();
+    await sleep(500); // fields revealed by earlier answers (e.g. self-ID after "wish to furnish")
+    await pass();
 
     return { filled, unmatched: [...new Set(unmatched)].slice(0, 25) };
   };
