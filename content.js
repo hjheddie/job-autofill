@@ -238,7 +238,7 @@
     return -1;
   }
 
-  const visibleOptions = () => [...document.querySelectorAll('[role=option], [role=listbox] li')]
+  const visibleOptions = () => [...document.querySelectorAll('[role=option], [role=listbox] li, [data-automation-id="promptOption"]')]
     .filter((o) => o.offsetParent !== null || o.getClientRects().length);
 
   const isEmptyChoice = (s) => !s || /^(select one|select|choose( one)?|please select|--+|—)$/i.test(s.trim());
@@ -304,7 +304,24 @@
     return t;
   }
 
-  // Multi-select search boxes (Workday "Skills"): type each skill and pick the matching suggestion.
+  function pressEnter(el) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    }
+  }
+
+  // Wait up to `ms` for suggestions to show up.
+  async function waitForOptions(ms) {
+    for (let t = 0; t < ms; t += 150) {
+      const opts = visibleOptions();
+      if (opts.length) return opts;
+      await sleep(150);
+    }
+    return [];
+  }
+
+  // Multi-select search boxes (Workday "Skills"): type a skill, run the search (Enter) if the
+  // suggestions don't appear by themselves, then click the matching result.
   const missingSkills = [];
   async function fillSkills(el, list) {
     let added = 0;
@@ -313,11 +330,21 @@
       el.focus();
       clickLike(el);
       setNative(el, skill);
-      await sleep(450);
-      const opts = visibleOptions();
+      let opts = await waitForOptions(600);
+      if (!opts.length) {
+        pressEnter(el);
+        opts = await waitForOptions(3000);
+      }
       const i = pickAny(opts.map((o) => txt(o)), [skill]);
-      if (i >= 0) { clickLike(opts[i]); added++; await sleep(200); } else missingSkills.push(skill);
-      setNative(el, '');
+      if (i >= 0) {
+        clickLike(opts[i]);
+        added++;
+        await sleep(400);
+      } else {
+        missingSkills.push(skill);
+      }
+      if (el.value) setNative(el, '');
+      await sleep(150);
     }
     return added > 0;
   }
