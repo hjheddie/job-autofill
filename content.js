@@ -320,8 +320,30 @@
     return [];
   }
 
-  // Multi-select search boxes (Workday "Skills"): type a skill, run the search (Enter) if the
-  // suggestions don't appear by themselves, then click the matching result.
+  // Result items we can't recognize by markup: elements that appeared after the search and
+  // whose text is the skill. Best match first (exact, then starts with, then contains).
+  function newResultItems(before, skill) {
+    const want = norm(skill);
+    const rank = (t) => (t === want ? 0 : t.startsWith(want) ? 1 : t.includes(want) ? 2 : 9);
+    return [...document.body.querySelectorAll('*')]
+      .filter((n) => !before.has(n) && !n.children.length && shown(n))
+      .map((n) => [n, rank(norm(txt(n)))])
+      .filter(([, r]) => r < 9)
+      .sort((a, b) => a[1] - b[1])
+      .map(([n]) => n);
+  }
+
+  async function waitForNewItems(before, skill, ms) {
+    for (let t = 0; t < ms; t += 150) {
+      const items = newResultItems(before, skill);
+      if (items.length) return items;
+      await sleep(150);
+    }
+    return [];
+  }
+
+  // Multi-select search boxes (Workday "Skills"): type a keyword, press Enter to run the search
+  // (if suggestions don't appear by themselves), then click the matching result in the list.
   const missingSkills = [];
   async function fillSkills(el, list) {
     let added = 0;
@@ -330,14 +352,20 @@
       el.focus();
       clickLike(el);
       setNative(el, skill);
-      let opts = await waitForOptions(600);
-      if (!opts.length) {
+      let target = null;
+      const known = await waitForOptions(600);
+      const k = pickAny(known.map((o) => txt(o)), [skill]);
+      if (k >= 0) target = known[k];
+      if (!target) {
+        const before = new Set(document.body.querySelectorAll('*'));
         pressEnter(el);
-        opts = await waitForOptions(3000);
+        const opts = await waitForOptions(3000);
+        const i = pickAny(opts.map((o) => txt(o)), [skill]);
+        if (i >= 0) target = opts[i];
+        else target = (await waitForNewItems(before, skill, 1500))[0] || null;
       }
-      const i = pickAny(opts.map((o) => txt(o)), [skill]);
-      if (i >= 0) {
-        clickLike(opts[i]);
+      if (target) {
+        clickLike(target);
         added++;
         await sleep(400);
       } else {
