@@ -15,6 +15,8 @@
   #bar { display: flex; gap: 6px; align-items: center; margin: 10px 0; }
   #bar select { width: auto; flex: 1; margin: 0; }
   #bar button { margin: 0; }
+  #bar2 { display: flex; gap: 6px; margin-bottom: 8px; }
+  #bar2 button { margin: 0; }
   fieldset { margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }
   button.secondary { background: #e5e7eb; color: #111; padding: 6px 12px; font-size: 13px; margin-top: 6px; }
 </style>
@@ -27,6 +29,11 @@
     <button type="button" id="pDup" class="secondary">Duplicate</button>
     <button type="button" id="pRen" class="secondary">Rename</button>
     <button type="button" id="pDel" class="secondary">Delete</button>
+  </div>
+  <div id="bar2">
+    <button type="button" id="pExport" class="secondary">Export all profiles</button>
+    <button type="button" id="pImport" class="secondary">Import profiles</button>
+    <input type="file" id="pImportFile" accept=".json,application/json" hidden>
   </div>
   <small>Stored only in this browser (chrome.storage.local). Nothing is sent anywhere.</small>
   <form id="f"></form>

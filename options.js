@@ -304,6 +304,43 @@ document.getElementById('pDel').onclick = async () => {
   await switchTo(Object.keys(store.profiles)[0]);
 };
 
+// ---- Export / import (backup, or move to a new install) ----
+document.getElementById('pExport').onclick = () => {
+  const body = JSON.stringify({ app: 'job-autofill', version: 1, profiles: store.profiles }, null, 2);
+  const url = URL.createObjectURL(new Blob([body], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: 'job-autofill-profiles.json' }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  flash('Exported saved profiles (unsaved edits not included)');
+};
+
+const importInput = document.getElementById('pImportFile');
+document.getElementById('pImport').onclick = () => { if (confirmDiscard()) importInput.click(); };
+importInput.onchange = async () => {
+  const file = importInput.files[0];
+  importInput.value = '';
+  if (!file) return;
+  try {
+    const json = JSON.parse(await file.text());
+    const incoming = Object.values(json.profiles || {})
+      .filter((p) => p && typeof p.name === 'string' && p.data && typeof p.data === 'object');
+    if (!incoming.length) throw new Error('No profiles found in that file');
+    const names = new Set(Object.values(store.profiles).map((p) => p.name));
+    let last;
+    for (const p of incoming) { // always added as new profiles; nothing is overwritten
+      let name = p.name.trim() || 'Imported';
+      while (names.has(name)) name += ' (imported)';
+      names.add(name);
+      last = JA_PROFILES.uid();
+      store.profiles[last] = { name, data: p.data };
+    }
+    await persist();
+    await switchTo(last);
+    flash(`Imported ${incoming.length} profile${incoming.length > 1 ? 's' : ''}`);
+  } catch (e) {
+    flash('Import failed: ' + (e.message || e));
+  }
+};
+
 document.getElementById('save').onclick = async (e) => {
   e.preventDefault();
   const data = collectForm();
