@@ -81,7 +81,7 @@
     return (root.getElementById ? root.getElementById(id) : null) || document.getElementById(id);
   }
 
-  const NOISE = /\b(please select one of the options|select one of the options|no selection|select one|please select|choose( one)?|required|optional)\b|-\s*select\s*-/g;
+  const NOISE = /\b(please select one of the options|select one of the options|no selection|select one|please select|choose( one)?|required|optional)\b|-\s*select\s*-/gi;
   // A label that says nothing about the question ("Please select one of the options").
   const isGeneric = (label) => label.replace(/\b(please|of the options|no selection|select|one)\b/g, '').trim().length < 3;
 
@@ -217,17 +217,38 @@
     }
   }
 
-  function pickOption(texts, answer) {
-    const a = norm(answer);
-    if (!a) return -1;
-    const t = texts.map(norm);
-    if (a === 'decline') return t.findIndex((x) => DECLINE.test(x));
-    let i = t.findIndex((x) => x === a);
-    if (i < 0) i = t.findIndex((x) => x.startsWith(a));
-    if (i < 0) i = t.findIndex((x) => x.length > 1 && x.includes(a));
-    if (i < 0) i = t.findIndex((x) => x.length > 1 && a.includes(x));
-    return i;
+  const PLACEHOLDER = /^(no selection|select one|select|please select|choose( one)?|--+|—)$/;
+
+  // Ways an option can match the answer, strictest first. Short answers ("us", "no") must match whole
+  // words, so "us" can't land on "Australia".
+  function tierFinders(a) {
+    const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const word = new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)');
+    const real = (x) => x && !PLACEHOLDER.test(x);
+    return [
+      (x) => x === a,
+      (x) => real(x) && x.startsWith(a) && (a.length >= 3 || !/[a-z0-9]/.test(x[a.length] || '')),
+      (x) => real(x) && word.test(x),
+      (x) => real(x) && a.length >= 4 && x.includes(a),
+      (x) => real(x) && x.length >= 4 && a.includes(x),
+    ];
   }
+
+  function pickAny(texts, answers) {
+    const t = texts.map(norm);
+    const list = answers.map(norm).filter(Boolean);
+    if (list[0] === 'decline') return t.findIndex((x) => DECLINE.test(x));
+    const finders = list.map(tierFinders);
+    for (let tier = 0; tier < 5; tier++) {
+      for (const f of finders) {
+        const i = t.findIndex(f[tier]);
+        if (i >= 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  const pickOption = (texts, answer) => pickAny(texts, [answer]);
 
   // Spelling variants for the same answer, most specific first ("IL" -> Illinois, IL).
   function variants(key, answer) {
@@ -288,11 +309,6 @@
   const skillsList = (p) => (Array.isArray(p.skills) ? p.skills : String(p.skills || '').split(/[,\n]/))
     .map((x) => x.trim()).filter(Boolean);
 
-  function pickAny(texts, answers) {
-    for (const a of answers) { const i = pickOption(texts, a); if (i >= 0) return i; }
-    return -1;
-  }
-
   const visibleOptions = () => [...document.querySelectorAll('[role=option], [role=listbox] li, [data-automation-id="promptOption"]')]
     .filter((o) => o.offsetParent !== null || o.getClientRects().length);
 
@@ -315,6 +331,18 @@
 
   const mark = (el) => { el.style.outline = '2px solid #22c55e'; el.style.outlineOffset = '1px'; };
 
+  const shownValue = (el) => norm(el instanceof HTMLSelectElement ? (el.options[el.selectedIndex]?.text || '')
+    : isListboxEl(el) ? txt(el) : el.value);
+
+  // Did the widget really take the option we clicked? Stops a wrong value from silently staying.
+  function tookPick(el, picked) {
+    const o = norm(picked);
+    const v = shownValue(el);
+    if (v && !PLACEHOLDER.test(v) && (v === o || v.includes(o) || (v.length > 3 && o.includes(v)))) return true;
+    const wrap = el.closest('[data-automation-id^="formField"]'); // multi-select widgets show a chip instead
+    return !!wrap && [...wrap.querySelectorAll('[data-automation-id*="selectedItem" i]')].some((c) => norm(txt(c)).includes(o));
+  }
+
   async function fillCombobox(el, answers) {
     el.focus();
     clickLike(el);
@@ -329,14 +357,18 @@
       opts = visibleOptions();
     }
     let i = pickAny(opts.map((o) => txt(o)), answers);
-    if (i < 0) { // empty list or no match: type to filter, then look again
-      setNative(el, answers[0]);
+    for (const typed of answers.slice(0, 3)) { // empty list or no match: type to filter, then look again
+      if (i >= 0) break;
+      setNative(el, typed);
       await sleep(350);
       opts = visibleOptions();
       i = pickAny(opts.map((o) => txt(o)), answers);
     }
     if (i < 0) { setNative(el, ''); el.blur(); return false; }
+    const picked = txt(opts[i]);
     clickLike(opts[i]);
+    await sleep(250);
+    if (!tookPick(el, picked)) { setNative(el, ''); el.blur(); return false; }
     return true;
   }
 
@@ -350,9 +382,10 @@
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       return false;
     }
+    const picked = txt(opts[i]);
     clickLike(opts[i]);
-    await sleep(150);
-    return true;
+    await sleep(200);
+    return tookPick(el, picked);
   }
 
   // Read a custom dropdown's choices without selecting anything.
