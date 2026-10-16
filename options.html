@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Job Autofill profile</title>
+<style>
+  body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin: 22px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  label { display: block; margin: 8px 0; font-size: 12px; color: #555; }
+  input, select, textarea { display: block; width: 100%; box-sizing: border-box; padding: 7px; margin-top: 3px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  button { padding: 9px 18px; font-size: 14px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+  #status { margin-left: 10px; color: #15803d; }
+  small { color: #777; }
+  #bar { display: flex; gap: 6px; align-items: center; margin: 10px 0; }
+  #bar select { width: auto; flex: 1; margin: 0; }
+  #bar button { margin: 0; }
+  fieldset { margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }
+  button.secondary { background: #e5e7eb; color: #111; padding: 6px 12px; font-size: 13px; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>Your profiles</h1>
+  <div id="bar">
+    <select id="profileSel"></select>
+    <button type="button" id="pNew" class="secondary">New</button>
+    <button type="button" id="pDup" class="secondary">Duplicate</button>
+    <button type="button" id="pRen" class="secondary">Rename</button>
+    <button type="button" id="pDel" class="secondary">Delete</button>
+  </div>
+  <small>Stored only in this browser (chrome.storage.local). Nothing is sent anywhere.</small>
+  <form id="f"></form>
+  <p><button id="save">Save</button><span id="status"></span></p>
+  <script src="data.js"></script>
+  <script src="profiles.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.zip
+
+# Never commit personal data
+.env*
+*.pdf
+*.doc
+*.docx
+*profile*.json
+resume*

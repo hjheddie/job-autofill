@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Fixture: Workday My Experience</title></head><body>
+<div id="app">
+ <div data-automation-id="workExperience-1">
+  <h3>Work Experience 1</h3>
+  <div><label for="w1t">Job Title *</label><input id="w1t" data-automation-id="jobTitle"></div>
+  <div><label for="w1c">Company *</label><input id="w1c"></div>
+  <div><label for="w1l">Location</label><input id="w1l"></div>
+  <div><label><input type="checkbox" id="w1cur"> I currently work here</label></div>
+  <div><span>From *</span><input id="w1sm" aria-label="Month" placeholder="MM"><input id="w1sy" aria-label="Year" placeholder="YYYY"></div>
+  <div><span>To *</span><input id="w1em" aria-label="Month" placeholder="MM"><input id="w1ey" aria-label="Year" placeholder="YYYY"></div>
+  <div><label for="w1d">Role Description</label><textarea id="w1d"></textarea></div>
+ </div>
+ <button id="addwork">Add Another</button>
+ <div data-automation-id="education-1">
+  <h3>Education 1</h3>
+  <div><label for="e1s">School or University *</label><input id="e1s"></div>
+  <div><label for="e1d">Degree *</label><button id="e1d" type="button" aria-haspopup="listbox">Select One</button>
+    <ul role="listbox"><li role="option">US - General Education - Associate's Degree</li><li role="option">US - General Education - Bachelor's Degree of Science</li></ul></div>
+  <div><label for="e1f">Field of Study</label><input id="e1f"></div>
+  <div><label for="e1g">Overall Result (GPA)</label><input id="e1g"></div>
+  <div><span>From</span><input id="e1fm" aria-label="Month" placeholder="MM"><input id="e1fy" aria-label="Year" placeholder="YYYY"><span>To (Actual or Expected)</span><input id="e1tm" aria-label="Month" placeholder="MM"><input id="e1ty" aria-label="Year" placeholder="YYYY"></div>
+ </div>
+ <button id="addedu">Add Another</button>
+ <h4>Websites</h4><button id="addweb">Add</button>
+</div>
+<script>
+ // "Add Another" under work clones a second work block (as Workday does).
+ document.getElementById('addwork').onclick=()=>{
+   const n=document.querySelectorAll('[data-automation-id^=workExperience-]').length+1;
+   const c=document.querySelector('[data-automation-id=workExperience-1]').cloneNode(true);
+   c.setAttribute('data-automation-id','workExperience-'+n);
+   c.querySelector('h3').textContent='Work Experience '+n;
+   c.querySelectorAll('input,textarea').forEach(i=>{i.id+= '_'+n; i.value='';});
+   c.querySelectorAll('label[for]').forEach(l=>l.htmlFor+='_'+n);
+   document.getElementById('addwork').before(c);
+ };
+ document.querySelectorAll('[role=option]').forEach(o=>o.addEventListener('click',()=>{document.getElementById('e1d').textContent=o.textContent;}));
+</script>
+</body></html>
