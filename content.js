@@ -767,11 +767,13 @@
     const filled = [];
     const unmatched = [];
     const covered = [];
-    scanHomeFields(collect(document, []));
+    const all = collect(document, []);
+    scanHomeFields(all);
+    scanJobRows(all);
     await fillSections(p, filled, covered);
     const seen = new WeakSet();
     let langRow = 0;
-    let workRow = 0;
+    const otherNeeded = new Set(); // degree/major dropdowns that had no match, so their "If other" box is filled
     async function pass() {
       const els = collect(document, []).filter((el) => !seen.has(el) && !covered.some((r) => r.contains(el)));
       els.forEach((el) => seen.add(el));
@@ -791,9 +793,14 @@
         if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
         if (type !== 'file' && !shown(el)) continue;
         let label = labelText(el);
-        if (/^search\b/.test(label) || /^if (other|not listed)\b/.test(label)) continue;
+        if (/^search\b/.test(label)) continue;
+        if (/^if (other|not listed)\b/.test(label)) { // helper box beside a dropdown: only when the dropdown had no match
+          const k = classify(el, label);
+          const v = k && otherNeeded.has(k) && !el.value ? valueFor(k, p) : '';
+          if (v) { setNative(el, v); mark(el); filled.push({ label: label.slice(0, 60), key: k }); }
+          continue;
+        }
         if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
-      if (/^from date\b/.test(label)) workRow++; // counted even when the row is already filled
 
         if (type === 'file') {
           // Workday's hidden file input has no label of its own, so also read the surrounding block.
@@ -824,15 +831,16 @@
         // generic rules (they would put your current company in every row).
         const sf = (SF_WORK.find(([, re]) => re.test(label)) || [])[0];
         if (sf) {
-          const e = (p.workExperience || [])[workRow - 1];
-          if (!e || (sf !== 'from' && workRow === 0)) continue;
+          const row = rowIndex(el);
+          const e = (p.workExperience || [])[row - 1];
+          if (!e) continue;
           let v = '';
           if (sf === 'from' || sf === 'to') v = sf === 'to' && e.current ? '' : rowDate(e, sf, label);
           else v = { company: e.company, title: e.title, city: e.location, industry: e.industry, employment: e.employmentType, country: e.country }[sf] || '';
           if (!v || (!isSelect && !isListbox && !isCombo && el.value)) continue;
           const ok = sf === 'from' || sf === 'to' ? await typeFormatted(el, v) : await setControl(el, v, sf === 'employment' ? 'employmentType' : sf === 'country' ? 'country' : null);
-          if (ok) { mark(el); filled.push({ label: `Job ${workRow}: ${label.slice(0, 40)}`, key: 'workRow' }); }
-          else unmatched.push(`${label.slice(0, 60)} (job ${workRow}) — no option matches "${v}"`);
+          if (ok) { mark(el); filled.push({ label: `Job ${row}: ${label.slice(0, 40)}`, key: 'workRow' }); }
+          else unmatched.push(`${label.slice(0, 60)} (job ${row}) — no option matches "${v}"`);
           continue;
         }
         let key = classify(el, label);
@@ -865,6 +873,13 @@
         else if (isCombo) ok = await fillCombobox(el, answers);
         else { setNative(el, answer); ok = true; }
 
+        if (!ok && (key === 'degree' || key === 'major')) {
+          otherNeeded.add(key);
+          const other = ['Other', 'Other/Not Applicable'];
+          if (isListbox) await fillListbox(el, other); else if (isSelect) fillSelect(el, other); else if (isCombo) await fillCombobox(el, other);
+          const now = shownValue(el);
+          ok = !!now && !PLACEHOLDER.test(now);
+        }
         if (ok) { mark(el); filled.push({ label: label.slice(0, 60), key: key || 'custom' }); }
         else unmatched.push(`${label.slice(0, 70)} — no option matches "${answers[0]}"${answers[0] === 'Decline' ? ' (this list has no decline choice; pick one yourself)' : ''}`);
       }
@@ -887,6 +902,7 @@
     await sleep(500); // fields revealed by earlier answers (e.g. self-ID after "wish to furnish")
     await pass();
 
+    window.__jobAutofillLast = { filled: filled.map((f) => f.label), unmatched: [...new Set(unmatched)] };
     return { filled, unmatched: [...new Set(unmatched)].slice(0, 25) };
   };
 
@@ -896,6 +912,26 @@
     ['city', /^company city\b/], ['industry', /^type of business\b/], ['employment', /^employment type\b/],
     ['country', /^company country\b/],
   ];
+
+  // Outermost light-DOM element for a field (date pickers keep their input inside a shadow root).
+  function hostOf(el) {
+    let n = el;
+    for (;;) {
+      const r = n.getRootNode();
+      if (r instanceof ShadowRoot) n = r.host; else return n;
+    }
+  }
+
+  let fromAnchors = [];
+  // Which job row a field belongs to = how many "From Date" boxes sit at or before it, in page order.
+  function scanJobRows(els) {
+    fromAnchors = els.filter((el) => /^from date\b/.test(labelText(el))).map(hostOf)
+      .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  }
+  function rowIndex(el) {
+    const a = hostOf(el);
+    return fromAnchors.filter((f) => f === a || (f.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING)).length;
+  }
 
   // Types a formatted value (07/01/2026) character by character, then commits it with Enter and blur.
   async function typeFormatted(el, text) {
@@ -1019,6 +1055,6 @@
         heading: sectionHeading(el).slice(0, 60) || undefined,
       });
     }
-    return { page: location.origin + location.pathname, topFrame: window === window.top, fields: fields.slice(0, 250) };
+    return { page: location.origin + location.pathname, topFrame: window === window.top, lastRun: window.__jobAutofillLast, fields: fields.slice(0, 250) };
   };
 })();
