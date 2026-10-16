@@ -21,6 +21,9 @@ Keep the folder somewhere permanent: Chrome loads an unpacked extension directly
 ## Multiple profiles
 Create, duplicate, rename and delete profiles on the options page (e.g. one per role type). The popup has a profile picker; the selected profile is the one that gets filled. An existing single profile is migrated automatically to "Default".
 
+## Skills
+Add skills (comma or line separated) to a profile. Plain "Skills" text boxes get them as a comma-separated list; search-and-pick boxes (Workday) get each skill typed and the matching suggestion chosen. Skills the site doesn't offer are listed under "Needs your attention".
+
 ## Work experience and education
 Saved in the profile as repeatable blocks. On pages with "Work Experience N" / "Education N" headings (Workday "My Experience") the filler matches entries to blocks in order, clicks **Add Another** when the page has fewer blocks than you have entries, fills dates as MM / YYYY, ticks "I currently work here", and maps degree to the closest dropdown option.
 

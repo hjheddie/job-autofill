@@ -155,6 +155,10 @@ form.insertAdjacentHTML('beforeend', `
     <button type="button" id="resumeRemove" class="secondary">Remove</button>
   </div>
   <small id="resumeNote"></small>
+  <h2>Skills</h2>
+  <label>Comma or line separated. Used for "Skills" boxes, including the search-and-pick ones.
+    <textarea name="skills" rows="3" placeholder="Python, SolidWorks, MATLAB, AutoCAD"></textarea>
+  </label>
   <h2>Saved answers</h2>
   <label>One per line: <code>question text =&gt; answer</code>. Matches when the form's label contains the question text.
     <textarea id="qa" rows="6" placeholder="how did you hear about us => LinkedIn&#10;willing to relocate => Yes"></textarea>
@@ -221,6 +225,7 @@ form.addEventListener('input', () => { dirty = true; });
 function collectForm() {
   const profile = {};
   new FormData(form).forEach((v, k) => { if (k !== 'resume') profile[k] = String(v).trim(); });
+  profile.skills = String(profile.skills || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
   if (profile.state) profile.state = canonState(profile.state);
   if (profile.country) profile.country = canonCountry(profile.country);
   for (const name of Object.keys(lists)) {
@@ -236,7 +241,11 @@ function collectForm() {
 
 function populateForm(profile) {
   profile = profile || {};
-  for (const el of form.elements) if (el.name) el.value = profile[el.name] != null ? profile[el.name] : '';
+  for (const el of form.elements) {
+    if (!el.name) continue;
+    const v = profile[el.name];
+    el.value = Array.isArray(v) ? v.join(', ') : v != null ? v : '';
+  }
   for (const name of Object.keys(lists)) {
     lists[name] = (profile[name] || []).map((e) => ({ ...e }));
     renderList(name);

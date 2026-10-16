@@ -44,6 +44,7 @@
     ['degree', /\bdegree\b/, 60],
     ['gpa', /\bgpa\b|grade point|overall result/, 60],
     ['major', /major|field of study|discipline/, 60],
+    ['skills', /\bskills?\b/],
     ['salary', /salary|compensation/],
     ['city', /\bcity\b/, 40],
     ['state', /\bstate\b|province/, 40],
@@ -139,6 +140,7 @@
   function valueFor(key, p) {
     switch (key) {
       case 'fullName': return [p.firstName, p.lastName].filter(Boolean).join(' ');
+      case 'skills': return skillsList(p).join(', ');
       case 'phoneExt': case 'secondLastName': return '';
       case 'middleName': return p.middleName || '';
       case 'furnish': // "Do you wish to furnish this information?": No unless some EEO answer was given
@@ -217,6 +219,9 @@
     return [...new Set(out)];
   }
 
+  const skillsList = (p) => (Array.isArray(p.skills) ? p.skills : String(p.skills || '').split(/[,\n]/))
+    .map((x) => x.trim()).filter(Boolean);
+
   function pickAny(texts, answers) {
     for (const a of answers) { const i = pickOption(texts, a); if (i >= 0) return i; }
     return -1;
@@ -286,6 +291,24 @@
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     await sleep(150);
     return t;
+  }
+
+  // Multi-select search boxes (Workday "Skills"): type each skill and pick the matching suggestion.
+  const missingSkills = [];
+  async function fillSkills(el, list) {
+    let added = 0;
+    missingSkills.length = 0;
+    for (const skill of list.slice(0, 20)) {
+      el.focus();
+      clickLike(el);
+      setNative(el, skill);
+      await sleep(450);
+      const opts = visibleOptions();
+      const i = pickAny(opts.map((o) => txt(o)), [skill]);
+      if (i >= 0) { clickLike(opts[i]); added++; await sleep(200); } else missingSkills.push(skill);
+      setNative(el, '');
+    }
+    return added > 0;
   }
 
   function fillSelect(el, answers) {
@@ -568,8 +591,13 @@
         }
         const answers = variants(key, answer);
 
+        const multi = key === 'skills' && (isCombo || el.getAttribute('aria-haspopup') || el.closest('[data-automation-id*="multiSelect" i]'));
         let ok = false;
-        if (isListbox) ok = await fillListbox(el, answers);
+        if (multi) {
+        ok = await fillSkills(el, skillsList(p));
+        if (missingSkills.length) unmatched.push(`skills this site doesn't list: ${missingSkills.join(', ')}`);
+      }
+        else if (isListbox) ok = await fillListbox(el, answers);
         else if (isSelect) ok = fillSelect(el, answers);
         else if (isCombo) ok = await fillCombobox(el, answers);
         else { setNative(el, answer); ok = true; }
