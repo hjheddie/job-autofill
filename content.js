@@ -52,7 +52,7 @@
     ['address', /street|address/, 40],
   ];
 
-  const DECLINE = /decline|prefer not|do not wish|don'?t wish|not to (say|disclose|answer)|choose not/;
+  const DECLINE = /decline|prefer not|do not (wish|want)|don'?t (wish|want)|not to (say|disclose|answer|furnish)|choose not/;
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password', 'search', 'range', 'color']);
 
   const norm = (s) => (s || '').toLowerCase().replace(/[*:?]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -187,6 +187,13 @@
         if (no) out.unshift('No, I do not have a disability', 'No, I do not have a disability and have not had one');
         if (yes) out.unshift('Yes, I have a disability', 'Yes, I have a disability, or have had one');
       }
+    } else if (key === 'race') {
+      const alts = [
+        [/american indian/i, ['American Indian/Alaskan Native', 'American Indian', 'Alaskan Native']],
+        [/pacific/i, ['Native Hawaiian or Other Pacific Island', 'Native Hawaiian']],
+        [/two or more/i, ['Two or more']],
+      ];
+      for (const [re, list] of alts) if (re.test(a)) { out.push(...list); break; }
     } else if (key === 'hispanic') {
       if (/^yes/i.test(a)) out.unshift('Hispanic or Latino');
       if (/^no/i.test(a)) out.unshift('Not Hispanic or Latino');
@@ -228,16 +235,30 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function clickLike(el) {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const Ev = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new Ev(type, { bubbles: true, cancelable: true, view: window }));
+    }
+  }
+
   const mark = (el) => { el.style.outline = '2px solid #22c55e'; el.style.outlineOffset = '1px'; };
 
   async function fillCombobox(el, answers) {
     el.focus();
-    setNative(el, answers[0]);
-    await sleep(350);
-    const opts = visibleOptions();
-    const i = pickAny(opts.map((o) => txt(o)), answers);
+    clickLike(el);
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, altKey: true, bubbles: true }));
+    await sleep(300);
+    let opts = visibleOptions();
+    let i = pickAny(opts.map((o) => txt(o)), answers);
+    if (i < 0) { // empty list or no match: type to filter, then look again
+      setNative(el, answers[0]);
+      await sleep(350);
+      opts = visibleOptions();
+      i = pickAny(opts.map((o) => txt(o)), answers);
+    }
     if (i < 0) { setNative(el, ''); el.blur(); return false; }
-    opts[i].click();
+    clickLike(opts[i]);
     return true;
   }
 
@@ -251,7 +272,7 @@
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       return false;
     }
-    opts[i].click();
+    clickLike(opts[i]);
     await sleep(150);
     return true;
   }
@@ -518,7 +539,8 @@
         const wrapEl = el.closest('[data-automation-id^="formField"]');
         if (wrapEl && wrapEl.querySelector('[data-automation-id*="selectedItem" i]')) continue;
         if (isListbox) { if (!isEmptyChoice(txt(el))) continue; }
-        else if (!isSelect && !isCombo && el.value) continue; // never overwrite
+        else if (isCombo && el.value && !isEmptyChoice(el.value) && !/^no selection$/i.test(el.value.trim())) continue;
+      else if (!isSelect && !isCombo && el.value) continue; // never overwrite
         if (isSelect && el.selectedIndex > 0) continue;
 
         let key = classify(el, label);
