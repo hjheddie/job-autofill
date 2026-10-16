@@ -19,8 +19,8 @@
     ['relatedEmployee', /related to anyone|relatives? (that|who|working)|family member/],
     ['sponsorship', /sponsor/],
     ['workAuth', /authori[sz]ed to work|legally (authori[sz]ed|eligible)|work authori[sz]ation|eligible to work|right to work/],
-    ['veteran', /veteran/],
-    ['disability', /disabilit/],
+    ['veteran', /veteran|vevraa/],
+    ['disability', /disabilit|cc-?305/],
     ['furnish', /wish to (furnish|provide|disclose|self)|furnish this information/],
     ['gender', /\bgender\b|\bsex\b/],
     ['hispanic', /hispanic|latino/],
@@ -52,7 +52,7 @@
     ['address', /street|address/, 40],
   ];
 
-  const DECLINE = /decline|prefer not|do not (wish|want)|don'?t (wish|want)|not to (say|disclose|answer|furnish)|choose not/;
+  const DECLINE = /decline|prefer not|do not (wish|want|choose)|don['’]?t (wish|want|choose)|not to (say|disclose|answer|furnish|identify)|choose not|self.?identify/;
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password', 'search', 'range', 'color']);
 
   const norm = (s) => (s || '').toLowerCase().replace(/[*:?]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -81,7 +81,7 @@
     for (let depth = 0; depth < 5 && node && node !== document.body; depth++, node = node.parentElement) {
       for (let sib = node.previousElementSibling; sib; sib = sib.previousElementSibling) {
         const t = norm(txt(sib).replace(NOISE, ' '));
-        if (t.length >= 15 && !isGeneric(t)) return t.slice(-300);
+        if (t.length >= 15 && !isGeneric(t)) return t.slice(0, 600);
       }
     }
     return '';
@@ -181,8 +181,8 @@
       const yes = /^yes/i.test(a);
       const no = /^no/i.test(a);
       if (key === 'veteran') {
-        if (no) out.unshift('I am not a protected veteran', 'not a protected veteran');
-        if (yes) out.unshift('I identify as one or more of the classifications of protected veteran', 'protected veteran');
+        if (no) out.unshift('I am not a protected veteran', 'not a protected veteran', 'I am not a veteran', 'not a veteran');
+        if (yes) out.unshift('I identify as one or more of the classifications of protected veteran', 'identify as one or more', 'protected veteran', 'I am a veteran');
       } else {
         if (no) out.unshift('No, I do not have a disability', 'No, I do not have a disability and have not had one');
         if (yes) out.unshift('Yes, I have a disability', 'Yes, I have a disability, or have had one');
@@ -275,6 +275,17 @@
     clickLike(opts[i]);
     await sleep(150);
     return true;
+  }
+
+  // Read a custom dropdown's choices without selecting anything.
+  async function peekOptions(el) {
+    el.focus();
+    clickLike(el);
+    await sleep(300);
+    const t = norm(visibleOptions().map((o) => txt(o)).join(' '));
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    await sleep(150);
+    return t;
   }
 
   function fillSelect(el, answers) {
@@ -544,8 +555,8 @@
         if (isSelect && el.selectedIndex > 0) continue;
 
         let key = classify(el, label);
-        if (!key && isSelect) {
-          const opts = norm([...el.options].map((o) => o.text).join(' '));
+        if (!key && (isSelect || isCombo)) {
+          const opts = isSelect ? norm([...el.options].map((o) => o.text).join(' ')) : await peekOptions(el);
           key = (RULES.find(([k, re]) => OPTION_RULES.includes(k) && re.test(opts)) || [])[0] || null;
         }
         let answer = customAnswer(label, p);
