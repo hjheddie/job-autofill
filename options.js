@@ -89,7 +89,10 @@ const LISTS = {
   workExperience: {
     title: 'Work experience (most recent first)', add: 'Add job',
     fields: [
-      ['title', 'Job title'], ['company', 'Company'], ['location', 'Location'],
+      ['title', 'Job title'], ['company', 'Company'], ['location', 'Location (city)'],
+      ['country', 'Company country'],
+      ['employmentType', 'Employment type', ['', 'Full-time', 'Part-time', 'Internship', 'Contract']],
+      ['industry', 'Industry / type of business'],
       ['current', 'I currently work here', 'checkbox'],
       ['fromMonth', 'Start month', MONTHS], ['fromYear', 'Start year'],
       ['toMonth', 'End month', MONTHS], ['toYear', 'End year'],

@@ -149,6 +149,16 @@
   }
 
   const PLACE_KEYS = new Set(['city', 'state', 'zip', 'country', 'address']);
+  const HOME_QUAL = /\b(present|current|home|mailing|permanent|residential|residence)\b/;
+  let homeQualified = new Set(); // place keys the page asks for explicitly as the home address
+  function scanHomeFields(els) {
+    homeQualified = new Set();
+    for (const el of els) {
+      const l = labelText(el);
+      if (!HOME_QUAL.test(l)) continue;
+      for (const [key, re] of RULES) if (PLACE_KEYS.has(key) && re.test(l)) homeQualified.add(key);
+    }
+  }
   const OTHER_PLACE = /company|employer|school|institution|universit|desired|relocat|birth|citizenship|emergency|reference|supervisor/;
   const OTHER_SECTION = /education|experience|employment|language|mobility|certification|membership|reference/;
 
@@ -161,7 +171,8 @@
       for (const [key, re, max] of RULES) {
         if (max && label.length > max) continue; // length limit applies to the visible label only
         if (!re.test(hay)) continue;
-        if (PLACE_KEYS.has(key) && (OTHER_PLACE.test(label) || OTHER_SECTION.test(sectionHeading(el)))) continue;
+        if (PLACE_KEYS.has(key) && (OTHER_PLACE.test(label) || OTHER_SECTION.test(sectionHeading(el))
+          || (homeQualified.has(key) && !HOME_QUAL.test(label)))) continue;
         return key;
       }
     }
@@ -268,6 +279,14 @@
         if (no) out.unshift('No, I do not have a disability', 'No, I do not have a disability and have not had one');
         if (yes) out.unshift('Yes, I have a disability', 'Yes, I have a disability, or have had one');
       }
+    } else if (key === 'employmentType') {
+      const alts = [
+        [/intern/i, ['Internship', 'Intern', 'Co-op', 'Temporary']],
+        [/full/i, ['Full-time', 'Full time', 'Regular', 'Permanent']],
+        [/part/i, ['Part-time', 'Part time']],
+        [/contract/i, ['Contract', 'Contractor', 'Temporary']],
+      ];
+      for (const [re, list] of alts) if (re.test(a)) { out.push(...list); break; }
     } else if (key === 'proficiency' || key === 'langProficiency') {
       const alts = [
         [/native|fluent/i, ['Fluent', 'Native', 'Expert', 'Advanced']],
@@ -343,7 +362,20 @@
     return !!wrap && [...wrap.querySelectorAll('[data-automation-id*="selectedItem" i]')].some((c) => norm(txt(c)).includes(o));
   }
 
+  // The clickable list item for one of the answers: known option markup first, then any element that
+  // appeared after opening the list and whose text is the answer.
+  function findCandidate(opts, answers, before) {
+    const i = pickAny(opts.map((o) => txt(o)), answers);
+    if (i >= 0) return opts[i];
+    for (const a of answers) {
+      const hit = newResultItems(before, a, 1)[0];
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   async function fillCombobox(el, answers) {
+    const before = new Set(document.body.querySelectorAll('*'));
     el.focus();
     clickLike(el);
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, altKey: true, bubbles: true }));
@@ -356,17 +388,19 @@
       await sleep(300);
       opts = visibleOptions();
     }
-    let i = pickAny(opts.map((o) => txt(o)), answers);
-    for (const typed of answers.slice(0, 3)) { // empty list or no match: type to filter, then look again
-      if (i >= 0) break;
+    let target = findCandidate(opts, answers, before);
+    // Long or paginated lists only load their first page: type to filter (results may load slowly).
+    for (const typed of answers.slice(0, 3)) {
+      if (target) break;
       setNative(el, typed);
-      await sleep(350);
-      opts = visibleOptions();
-      i = pickAny(opts.map((o) => txt(o)), answers);
+      for (let t = 0; t < 2400 && !target; t += 300) {
+        await sleep(300);
+        target = findCandidate(visibleOptions(), answers, before);
+      }
     }
-    if (i < 0) { setNative(el, ''); el.blur(); return false; }
-    const picked = txt(opts[i]);
-    clickLike(opts[i]);
+    if (!target) { setNative(el, ''); el.blur(); return false; }
+    const picked = txt(target);
+    clickLike(target);
     await sleep(250);
     if (!tookPick(el, picked)) { setNative(el, ''); el.blur(); return false; }
     return true;
@@ -417,13 +451,13 @@
 
   // Result items we can't recognize by markup: elements that appeared after the search and
   // whose text is the skill. Best match first (exact, then starts with, then contains).
-  function newResultItems(before, skill) {
+  function newResultItems(before, skill, maxRank = 2) {
     const want = norm(skill);
     const rank = (t) => (t === want ? 0 : t.startsWith(want) ? 1 : t.includes(want) ? 2 : 9);
     return [...document.body.querySelectorAll('*')]
       .filter((n) => !before.has(n) && !n.children.length && shown(n))
       .map((n) => [n, rank(norm(txt(n)))])
-      .filter(([, r]) => r < 9)
+      .filter(([, r]) => r <= maxRank)
       .sort((a, b) => a[1] - b[1])
       .map(([n]) => n);
   }
@@ -733,9 +767,11 @@
     const filled = [];
     const unmatched = [];
     const covered = [];
+    scanHomeFields(collect(document, []));
     await fillSections(p, filled, covered);
     const seen = new WeakSet();
     let langRow = 0;
+    let workRow = 0;
     async function pass() {
       const els = collect(document, []).filter((el) => !seen.has(el) && !covered.some((r) => r.contains(el)));
       els.forEach((el) => seen.add(el));
@@ -753,9 +789,11 @@
           continue;
         }
         if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
+        if (type !== 'file' && !shown(el)) continue;
         let label = labelText(el);
         if (/^search\b/.test(label) || /^if (other|not listed)\b/.test(label)) continue;
         if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
+      if (/^from date\b/.test(label)) workRow++; // counted even when the row is already filled
 
         if (type === 'file') {
           // Workday's hidden file input has no label of its own, so also read the surrounding block.
@@ -782,6 +820,21 @@
       else if (!isSelect && !isCombo && el.value) continue; // never overwrite
         if (isSelect && el.selectedIndex > 0) continue;
 
+        // Work-experience rows: the Nth "From Date" starts the Nth saved job; never fall through to the
+        // generic rules (they would put your current company in every row).
+        const sf = (SF_WORK.find(([, re]) => re.test(label)) || [])[0];
+        if (sf) {
+          const e = (p.workExperience || [])[workRow - 1];
+          if (!e || (sf !== 'from' && workRow === 0)) continue;
+          let v = '';
+          if (sf === 'from' || sf === 'to') v = sf === 'to' && e.current ? '' : rowDate(e, sf, label);
+          else v = { company: e.company, title: e.title, city: e.location, industry: e.industry, employment: e.employmentType, country: e.country }[sf] || '';
+          if (!v || (!isSelect && !isListbox && !isCombo && el.value)) continue;
+          const ok = sf === 'from' || sf === 'to' ? await typeFormatted(el, v) : await setControl(el, v, sf === 'employment' ? 'employmentType' : sf === 'country' ? 'country' : null);
+          if (ok) { mark(el); filled.push({ label: `Job ${workRow}: ${label.slice(0, 40)}`, key: 'workRow' }); }
+          else unmatched.push(`${label.slice(0, 60)} (job ${workRow}) — no option matches "${v}"`);
+          continue;
+        }
         let key = classify(el, label);
         if (!key && (isSelect || isCombo)) {
           const opts = isSelect ? norm([...el.options].map((o) => o.text).join(' ')) : await peekOptions(el);
@@ -837,7 +890,42 @@
     return { filled, unmatched: [...new Set(unmatched)].slice(0, 25) };
   };
 
-  // ---- Remember answers: save what you chose on this page as reusable saved answers ----
+  // ---- Work-experience rows without headings (SuccessFactors profile): a row starts at "From Date" ----
+  const SF_WORK = [
+    ['from', /^from date\b/], ['to', /^end date\b/], ['company', /^company name\b/], ['title', /^position title\b/],
+    ['city', /^company city\b/], ['industry', /^type of business\b/], ['employment', /^employment type\b/],
+    ['country', /^company country\b/],
+  ];
+
+  // Types a formatted value (07/01/2026) character by character, then commits it with Enter and blur.
+  async function typeFormatted(el, text) {
+    el.focus();
+    el.click();
+    for (const ch of String(text)) {
+      if (key(el, 'keydown', ch)) { key(el, 'keypress', ch); insertChar(el, ch); }
+      key(el, 'keyup', ch);
+      await sleep(20);
+    }
+    pressEnter(el);
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    el.blur();
+    await sleep(80);
+    if (!el.value) setNative(el, String(text)); // last resort
+    return true;
+  }
+
+  function rowDate(e, which, label) {
+    const y = e[which + 'Year'];
+    const m = e[which + 'Month'];
+    if (!y || !m) return '';
+    const mm = String(m).padStart(2, '0');
+    if (/mm\/yyyy/.test(label) && !/dd/.test(label)) return `${mm}/${y}`;
+    const dd = which === 'from' ? '01' : String(new Date(Number(y), Number(m), 0).getDate()).padStart(2, '0');
+    return `${mm}/${dd}/${y}`;
+  }
+
+  // Remember answers: save what you chose on this page as reusable saved answers ----
   // Personal details live in the profile, so they are never copied into saved answers.
   const LEARN_SKIP = new Set(['email', 'phone', 'secondaryPhone', 'phoneExt', 'phoneCountryCode', 'phoneType',
     'firstName', 'middleName', 'lastName', 'secondLastName', 'fullName', 'preferredName', 'address', 'address2',
@@ -860,6 +948,7 @@
     const store = await window.JA_PROFILES.load();
     const profile = store.profiles[store.activeProfileId].data;
     const qa = profile.customQA || (profile.customQA = []);
+    scanHomeFields(collect(document, []));
     const learned = [];
     const radios = new Map();
 
@@ -908,6 +997,7 @@
   // ---- Troubleshooting report: what the extension sees, without your typed text ----
   window.__jobAutofillReport = async function () {
     const p = (await window.JA_PROFILES.active()) || {};
+    scanHomeFields(collect(document, []));
     const fields = [];
     for (const el of collect(document, [])) {
       const isListbox = isListboxEl(el);

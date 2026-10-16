@@ -49,3 +49,6 @@ Saved in the profile as repeatable blocks. On pages with "Work Experience N" / "
 - Next time, a question is answered when it contains a saved question's text, or repeats most of its key words, so "Have you ever been employed by X?" is reused across companies.
 - Review or edit them under **Edit profile → Saved answers**.
 - If a dropdown or field won't fill, click **Copy field report** in the popup and share it. It lists the fields the extension sees and has no typed text.
+
+## Work experience rows (SuccessFactors-style profile pages)
+Pages that list repeated rows starting with "From Date" (Company Name, Type of Business, Company Country, Position Title, Employment Type…) are filled row by row from your saved jobs: the Nth row gets the Nth job. Add employment type, industry and company country to each job in your profile. Plain "Country / State / City" boxes in an Education block are left alone when the page also has "Present …" address fields.
