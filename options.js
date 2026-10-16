@@ -7,7 +7,7 @@ const RACES = [
 
 const SECTIONS = [
   ['Contact', [
-    ['firstName', 'First name'], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'],
+    ['firstName', 'First name'], ['middleName', 'Middle name'], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'],
     ['address', 'Street address'], ['city', 'City'], ['state', 'State / province', 'states'],
     ['zip', 'ZIP / postal code'], ['country', 'Country', 'countries'],
   ]],
@@ -16,12 +16,18 @@ const SECTIONS = [
   ]],
   ['Other', [
     ['salary', 'Salary expectation'],
+    ['over18', 'At least 18 years old?', YESNO],
+    ['restrictive', 'Bound by non-compete / restrictive agreements?', YESNO],
+    ['previousEmployee', 'Previously employed by the company? (blank = answer each time)', YESNO],
+    ['referral', 'Referred by a current employee?', YESNO],
+    ['relatedEmployee', 'Related to an employee?', YESNO],
   ]],
   ['Work authorization', [
     ['workAuth', 'Legally authorized to work?', YESNO],
     ['sponsorship', 'Require visa sponsorship?', YESNO],
   ]],
   ['Voluntary self-identification (blank or "Decline" = decline to answer)', [
+    ['furnish', 'Answer voluntary self-ID questions? (blank = No if all below are Decline)', YESNO],
     ['gender', 'Gender', EEO],
     ['race', 'Race', RACES],
     ['hispanic', 'Hispanic or Latino?', ['', 'Decline', 'Yes', 'No']],

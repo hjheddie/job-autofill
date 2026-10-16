@@ -12,10 +12,16 @@
 
   // Order matters: question-style rules first, short-label rules last.
   const RULES = [
+    ['over18', /at least 18|18 years|over 18|eighteen/],
+    ['restrictive', /restrictive covenant|non-?compete|confidentiality agreement|contractual obligation/],
+    ['previousEmployee', /ever (been )?employed|previously (been )?employed|former employee|worked for .{0,40}(before|previously)/],
+    ['referral', /referred by|employee referral/],
+    ['relatedEmployee', /related to anyone|relatives? (that|who|working)|family member/],
     ['sponsorship', /sponsor/],
     ['workAuth', /authori[sz]ed to work|legally (authori[sz]ed|eligible)|work authori[sz]ation|eligible to work|right to work/],
     ['veteran', /veteran/],
     ['disability', /disabilit/],
+    ['furnish', /wish to (furnish|provide|disclose|self)|furnish this information/],
     ['gender', /\bgender\b|\bsex\b/],
     ['hispanic', /hispanic|latino/],
     ['race', /\brace\b|ethnic/],
@@ -24,6 +30,8 @@
     ['phoneCountryCode', /phone code|country code|dial(ing)? code|phone.*country|country.*phone/],
     ['phoneType', /device type|phone type|type of phone/],
     ['phone', /phone|mobile|telephone/],
+    ['secondLastName', /second last name|second surname|maternal/],
+    ['middleName', /middle (name|initial)/],
     ['firstName', /first.?name|given.?name|legal first|preferred first/],
     ['lastName', /last.?name|family.?name|surname|legal last/],
     ['fullName', /^(full |legal |your )?name$|full.?name|legal name/],
@@ -63,7 +71,24 @@
     return (root.getElementById ? root.getElementById(id) : null) || document.getElementById(id);
   }
 
-  const NOISE = /\b(select one|please select|choose( one)?|required|optional)\b/g;
+  const NOISE = /\b(please select one of the options|select one of the options|no selection|select one|please select|choose( one)?|required|optional)\b|-\s*select\s*-/g;
+  // A label that says nothing about the question ("Please select one of the options").
+  const isGeneric = (label) => label.replace(/\b(please|of the options|no selection|select|one)\b/g, '').trim().length < 3;
+
+  // Text of the nearest preceding block that isn't itself a generic label: usually the question.
+  function contextBefore(el) {
+    let node = el;
+    for (let depth = 0; depth < 5 && node && node !== document.body; depth++, node = node.parentElement) {
+      for (let sib = node.previousElementSibling; sib; sib = sib.previousElementSibling) {
+        const t = norm(txt(sib).replace(NOISE, ' '));
+        if (t.length >= 15 && !isGeneric(t)) return t.slice(-300);
+      }
+    }
+    return '';
+  }
+
+  // Option text identifies EEO-style selects whose label is generic (veteran, disability, ...).
+  const OPTION_RULES = ['veteran', 'disability', 'gender', 'race', 'hispanic'];
 
   function labelText(el) {
     const parts = [];
@@ -77,13 +102,17 @@
     parts.push(el.getAttribute('aria-label') || '', el.placeholder || '');
     if (!parts.join('').trim()) {
       const legend = el.closest('fieldset')?.querySelector('legend');
+      const before = legend ? '' : contextBefore(el);
       if (legend) parts.push(txt(legend));
+      else if (before) parts.push(before);
       else {
         const c = el.closest('[class*=field],[class*=question],[class*=form-group],li') || el.parentElement;
         if (c) parts.push(txt(c).slice(0, 160));
       }
     }
-    return norm(parts.join(' ').replace(NOISE, ' '));
+    const seen = new Set();
+    const uniq = parts.map((x) => norm(x.replace(NOISE, ' '))).filter((x) => x && !seen.has(x) && seen.add(x));
+    return uniq.join(' ');
   }
 
   function questionText(group) {
@@ -110,7 +139,11 @@
   function valueFor(key, p) {
     switch (key) {
       case 'fullName': return [p.firstName, p.lastName].filter(Boolean).join(' ');
-      case 'phoneExt': return p.phoneExt || '';
+      case 'phoneExt': case 'secondLastName': return '';
+      case 'middleName': return p.middleName || '';
+      case 'furnish': // "Do you wish to furnish this information?": No unless some EEO answer was given
+        return p.furnish || (['gender', 'race', 'hispanic', 'veteran', 'disability']
+          .every((k) => !p[k] || /^decline$/i.test(p[k])) ? 'No' : 'Yes');
       case 'phoneCountryCode': return p.phoneCountryCode || p.country || 'United States';
       case 'phoneType': return p.phoneType || 'Mobile';
       case 'gender': case 'race': case 'hispanic': case 'veteran': case 'disability': return p[key] || 'Decline';
@@ -456,7 +489,10 @@
         radios.get(k).push(el);
         continue;
       }
-      const label = labelText(el);
+      if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
+      let label = labelText(el);
+      if (/^search\b/.test(label)) continue;
+      if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
 
       if (type === 'file') {
         // Workday's hidden file input has no label of its own, so also read the surrounding block.
@@ -482,10 +518,18 @@
       else if (!isSelect && !isCombo && el.value) continue; // never overwrite
       if (isSelect && el.selectedIndex > 0) continue;
 
-      const key = classify(el, label);
+      let key = classify(el, label);
+      if (!key && isSelect) {
+        const opts = norm([...el.options].map((o) => o.text).join(' '));
+        key = (RULES.find(([k, re]) => OPTION_RULES.includes(k) && re.test(opts)) || [])[0] || null;
+      }
       let answer = customAnswer(label, p);
       if (answer == null && key) answer = valueFor(key, p);
-      if (!answer) { if (label && key !== 'phoneExt') unmatched.push(label.slice(0, 80)); continue; }
+      if (!answer) {
+        const quiet = ['phoneExt', 'secondLastName', 'middleName'].includes(key) || /^if (yes|so|you)\b/.test(label);
+        if (label && !quiet) unmatched.push(label.slice(0, 80));
+        continue;
+      }
       const answers = variants(key, answer);
 
       let ok = false;
