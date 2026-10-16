@@ -43,3 +43,9 @@ Saved in the profile as repeatable blocks. On pages with "Work Experience N" / "
 - The extension runs only when you click **Fill this page** (`activeTab`) and has no network access or remote code.
 - Filled values are visible to the page you fill, as with any autofill. Only use it on sites you trust.
 - Do not commit exported profiles or resumes (`.gitignore` blocks common names).
+
+## Saved answers (questions your profile doesn't cover)
+- Answer a page's questions yourself, then click **Remember my answers on this page** in the popup. Each question and your answer is saved to the active profile (personal details such as name and address are never copied into saved answers).
+- Next time, a question is answered when it contains a saved question's text, or repeats most of its key words, so "Have you ever been employed by X?" is reused across companies.
+- Review or edit them under **Edit profile → Saved answers**.
+- If a dropdown or field won't fill, click **Copy field report** in the popup and share it. It lists the fields the extension sees and has no typed text.

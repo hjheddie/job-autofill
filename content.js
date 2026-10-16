@@ -12,6 +12,9 @@
 
   // Order matters: question-style rules first, short-label rules last.
   const RULES = [
+    ['expectedGraduation', /expected graduation|anticipated graduation|expected completion/],
+    ['graduationDate', /graduation date|date of graduation|date graduated|completion date/],
+    ['degreeCompleted', /degree (been )?completed|completed (this|the) degree|degree completed/],
     ['over18', /at least 18|18 years|over 18|eighteen/],
     ['restrictive', /restrictive covenant|non-?compete|confidentiality agreement|contractual obligation/],
     ['previousEmployee', /ever (been )?employed|previously (been )?employed|former employee|worked for .{0,40}(before|previously)/],
@@ -26,12 +29,14 @@
     ['hispanic', /hispanic|latino/],
     ['race', /\brace\b|ethnic/],
     ['email', /e-?mail/],
+    ['secondaryPhone', /secondary phone|alternate phone|alt\.? phone|other phone|home phone|work phone/],
     ['phoneExt', /extension|\bext\b/],
     ['phoneCountryCode', /phone code|country code|dial(ing)? code|phone.*country|country.*phone/],
     ['phoneType', /device type|phone type|type of phone/],
     ['phone', /phone|mobile|telephone/],
     ['secondLastName', /second last name|second surname|maternal/],
     ['middleName', /middle (name|initial)/],
+    ['preferredName', /preferred name|nickname|goes by/],
     ['firstName', /first.?name|given.?name|legal first|preferred first/],
     ['lastName', /last.?name|family.?name|surname|legal last/],
     ['fullName', /^(full |legal |your )?name$|full.?name|legal name/],
@@ -45,13 +50,16 @@
     ['gpa', /\bgpa\b|grade point|overall result/, 60],
     ['major', /major|field of study|discipline/, 60],
     ['skills', /\bskills?\b/],
+    ['langProficiency', /(speaking|reading|writing|listening|comprehension|overall) proficiency|proficiency level/],
+    ['languageName', /^language\b/],
     ['languages', /^(?!.*(programming|coding|markup)).*\blanguages?\b/],
     ['salary', /salary|compensation/],
     ['city', /\bcity\b/, 40],
-    ['state', /\bstate\b|province/, 40],
     ['zip', /zip|postal/, 40],
     ['country', /country/, 40],
-    ['address', /street|address/, 40],
+    ['state', /\bstate\b|province|^region\b/, 40],
+    ['address2', /address line 2|address 2|line 2|\bsuite\b|\bunit\b/, 40],
+    ['address', /street|address/, 60],
   ];
 
   const DECLINE = /decline|prefer not|do not (wish|want|choose)|don['’]?t (wish|want|choose)|not to (say|disclose|answer|furnish|identify)|choose not|self.?identify/;
@@ -127,15 +135,53 @@
     return norm(c ? txt(c).slice(0, 200) : '');
   }
 
+  // A page section heading near the field ("Education", "External Work Experience", ...).
+  function sectionHeading(el) {
+    let node = el;
+    for (let depth = 0; depth < 8 && node && node !== document.body; depth++, node = node.parentElement) {
+      let sib = node.previousElementSibling;
+      for (let n = 0; sib && n < 15; n++, sib = sib.previousElementSibling) {
+        const h = sib.matches('h1,h2,h3,h4,h5,h6,legend,[role=heading]') ? sib : sib.querySelector('h1,h2,h3,h4,h5,h6,legend,[role=heading]');
+        if (h && norm(txt(h))) return norm(txt(h));
+      }
+    }
+    return '';
+  }
+
+  const PLACE_KEYS = new Set(['city', 'state', 'zip', 'country', 'address']);
+  const OTHER_PLACE = /company|employer|school|institution|universit|desired|relocat|birth|citizenship|emergency|reference|supervisor/;
+  const OTHER_SECTION = /education|experience|employment|language|mobility|certification|membership|reference/;
+
   function classify(el, label) {
     const ac = (el.getAttribute('autocomplete') || '').split(/\s+/).pop();
-    const hay = norm(`${label} ${el.name || ''} ${el.id || ''}`.replace(/[_\-[\]]/g, ' '));
-    // Specific rules by label/name text win over autocomplete (e.g. "name" fields).
-    for (const [key, re, max] of RULES) {
-      if (max && label.length > max) continue; // length limit applies to the visible label only
-      if (re.test(hay)) return key;
+    const attrs = norm(`${el.name || ''} ${el.id || ''}`.replace(/[_\-[\]]/g, ' '));
+    // The visible label wins over name/id tokens ("State" inside id "countryRegion" is a state);
+    // name/id only decide when the label says nothing. Both beat autocomplete (e.g. "name" fields).
+    for (const hay of [norm(label), norm(`${label} ${attrs}`)]) {
+      for (const [key, re, max] of RULES) {
+        if (max && label.length > max) continue; // length limit applies to the visible label only
+        if (!re.test(hay)) continue;
+        if (PLACE_KEYS.has(key) && (OTHER_PLACE.test(label) || OTHER_SECTION.test(sectionHeading(el)))) continue;
+        return key;
+      }
     }
     return AUTOCOMPLETE[ac] || null;
+  }
+
+  // Graduation date from the first education entry; `expected` picks the "(if not completed)" box.
+  function gradDate(p, expected, placeholder) {
+    const e = (p.education || [])[0];
+    if (!e || !e.toYear) return '';
+    const y = Number(e.toYear);
+    const m = Number(e.toMonth || 12);
+    const done = new Date(y, m - 1, 28) <= new Date();
+    if (done === expected) return ''; // completed -> "Graduation Date"; not yet -> "Expected Graduation Date"
+    const mm = String(m).padStart(2, '0');
+    const dd = String(new Date(y, m, 0).getDate()).padStart(2, '0');
+    const ph = (placeholder || '').toUpperCase();
+    if (/^YYYY$/.test(ph)) return String(y);
+    if (/MM\W+YYYY/.test(ph) && !/DD/.test(ph)) return `${mm}/${y}`;
+    return `${mm}/${dd}/${y}`;
   }
 
   function valueFor(key, p) {
@@ -145,6 +191,15 @@
       case 'languages': return (p.languages || []).filter((l) => l.language)
         .map((l) => (l.proficiency ? `${l.language} (${l.proficiency})` : l.language)).join(', ');
       case 'phoneExt': case 'secondLastName': return '';
+      case 'secondaryPhone': return p.secondaryPhone || '';
+      case 'graduationDate': case 'expectedGraduation': return '';
+      case 'address2': return p.address2 || '';
+      case 'preferredName': return p.preferredName || p.firstName || '';
+      case 'degreeCompleted': { // Yes once the graduation date has passed
+        const e = (p.education || [])[0];
+        if (!e || !e.toYear) return '';
+        return new Date(Number(e.toYear), Number(e.toMonth || 12) - 1, 28) <= new Date() ? 'Yes' : 'No';
+      }
       case 'middleName': return p.middleName || '';
       case 'furnish': // "Do you wish to furnish this information?": No unless some EEO answer was given
         return p.furnish || (['gender', 'race', 'hispanic', 'veteran', 'disability']
@@ -192,7 +247,7 @@
         if (no) out.unshift('No, I do not have a disability', 'No, I do not have a disability and have not had one');
         if (yes) out.unshift('Yes, I have a disability', 'Yes, I have a disability, or have had one');
       }
-    } else if (key === 'proficiency') {
+    } else if (key === 'proficiency' || key === 'langProficiency') {
       const alts = [
         [/native|fluent/i, ['Fluent', 'Native', 'Expert', 'Advanced']],
         [/advanced/i, ['Advanced', 'Fluent', 'Proficient']],
@@ -266,6 +321,13 @@
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, altKey: true, bubbles: true }));
     await sleep(300);
     let opts = visibleOptions();
+    if (!opts.length) { // open from the arrow/trigger next to the box, or with a plain ArrowDown
+      const arrow = el.parentElement?.querySelector('button, [class*=arrow i], [class*=caret i], [class*=drop i], [class*=trigger i], [class*=icon i]');
+      if (arrow && arrow !== el) clickLike(arrow);
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+      await sleep(300);
+      opts = visibleOptions();
+    }
     let i = pickAny(opts.map((o) => txt(o)), answers);
     if (i < 0) { // empty list or no match: type to filter, then look again
       setNative(el, answers[0]);
@@ -379,7 +441,8 @@
 
   function fillSelect(el, answers) {
     const opts = [...el.options];
-    const i = pickAny(opts.map((o) => o.text), answers);
+    let i = pickAny(opts.map((o) => o.text), answers);
+    if (i < 0) i = pickAny(opts.map((o) => o.value), answers);
     if (i < 0) return false;
     el.selectedIndex = i;
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -394,12 +457,26 @@
     return new File([bytes], r.name, { type: r.type || 'application/pdf' });
   }
 
+  const STOP = new Set(['the', 'and', 'for', 'you', 'your', 'are', 'does', 'have', 'has', 'been', 'that', 'this', 'with',
+    'any', 'please', 'will', 'would', 'our', 'can', 'not', 'from', 'into', 'than', 'then', 'there', 'their', 'such']);
+  const words = (s) => norm(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w));
+
+  // Exact containment first; otherwise the closest saved question by shared words.
   function customAnswer(label, p) {
+    const have = new Set(words(label));
+    let best = null;
+    let bestScore = 0;
     for (const qa of p.customQA || []) {
       const q = norm(qa.q);
-      if (q && label.includes(q)) return qa.a;
+      if (!q) continue;
+      if (label.includes(q)) return qa.a;
+      const qw = words(qa.q);
+      if (qw.length < 3) continue;
+      const shared = qw.filter((w) => have.has(w)).length;
+      const score = shared / qw.length; // how much of the saved question the label repeats
+      if (shared >= 3 && score > bestScore) { bestScore = score; best = qa; }
     }
-    return null;
+    return bestScore >= 0.6 ? best.a : null;
   }
 
   // ---- Repeating sections: "Work Experience 1", "Education 1", … (Workday "My Experience") ----
@@ -625,6 +702,7 @@
     const covered = [];
     await fillSections(p, filled, covered);
     const seen = new WeakSet();
+    let langRow = 0;
     async function pass() {
       const els = collect(document, []).filter((el) => !seen.has(el) && !covered.some((r) => r.contains(el)));
       els.forEach((el) => seen.add(el));
@@ -643,7 +721,7 @@
         }
         if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
         let label = labelText(el);
-        if (/^search\b/.test(label)) continue;
+        if (/^search\b/.test(label) || /^if (other|not listed)\b/.test(label)) continue;
         if (type !== 'file' && isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
 
         if (type === 'file') {
@@ -678,9 +756,13 @@
         }
         let answer = customAnswer(label, p);
         if (answer == null && key) answer = valueFor(key, p);
+      // Language Skills rows: the Nth "Language" box gets the Nth language, its ratings get that row's level.
+      if (key === 'languageName') { langRow++; answer = (p.languages || [])[langRow - 1]?.language || ''; }
+      else if (key === 'langProficiency') answer = (p.languages || [])[Math.max(langRow - 1, 0)]?.proficiency || '';
+      else if (key === 'graduationDate' || key === 'expectedGraduation') answer = gradDate(p, key === 'expectedGraduation', el.placeholder);
       if (key === 'languages' && (isSelect || isListbox || isCombo)) answer = (p.languages || [])[0]?.language || '';
         if (!answer) {
-          const quiet = ['phoneExt', 'secondLastName', 'middleName'].includes(key) || /^if (yes|so|you)\b/.test(label);
+          const quiet = ['phoneExt', 'secondLastName', 'middleName', 'secondaryPhone', 'address2', 'graduationDate', 'expectedGraduation'].includes(key) || /^if (yes|so|you)\b/.test(label);
           if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${key ? `no "${key}" saved in your profile` : 'field not recognized'}`);
           continue;
         }
@@ -720,5 +802,100 @@
     await pass();
 
     return { filled, unmatched: [...new Set(unmatched)].slice(0, 25) };
+  };
+
+  // ---- Remember answers: save what you chose on this page as reusable saved answers ----
+  // Personal details live in the profile, so they are never copied into saved answers.
+  const LEARN_SKIP = new Set(['email', 'phone', 'secondaryPhone', 'phoneExt', 'phoneCountryCode', 'phoneType',
+    'firstName', 'middleName', 'lastName', 'secondLastName', 'fullName', 'preferredName', 'address', 'address2',
+    'city', 'state', 'zip', 'country', 'linkedin', 'github', 'portfolio', 'salary', 'currentCompany', 'currentTitle',
+    'school', 'degree', 'major', 'gpa', 'skills', 'languages', 'languageName', 'langProficiency', 'graduationDate',
+    'expectedGraduation', 'degreeCompleted']);
+
+  // What the field currently shows, or '' while it still holds a placeholder such as "No Selection".
+  function currentAnswer(el) {
+    if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 ? el.options[el.selectedIndex].text.trim() : '';
+    const t = (isListboxEl(el) ? txt(el) : el.value || '').trim();
+    return isEmptyChoice(t) || /^no selection$/i.test(t) ? '' : t;
+  }
+
+  function skippable(el) {
+    return el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]');
+  }
+
+  window.__jobAutofillLearn = async function () {
+    const store = await window.JA_PROFILES.load();
+    const profile = store.profiles[store.activeProfileId].data;
+    const qa = profile.customQA || (profile.customQA = []);
+    const learned = [];
+    const radios = new Map();
+
+    const remember = (label, answer) => {
+      const q = label.trim().slice(0, 160);
+      if (q.length < 4 || /\b(date|month|year|mm|yyyy)\b/.test(q) || !answer || answer.length > 300) return;
+      const existing = qa.find((x) => norm(x.q) === norm(q));
+      if (existing) existing.a = answer; else qa.push({ q, a: answer });
+      learned.push({ q, a: answer });
+    };
+
+    for (const el of collect(document, [])) {
+      const isListbox = isListboxEl(el);
+      const type = isListbox ? 'listbox' : (el.type || '').toLowerCase();
+      if (SKIP_TYPES.has(type) || ['checkbox', 'file'].includes(type) || el.disabled || el.tagName === 'TEXTAREA') continue;
+      if (type === 'radio') {
+        const k = (el.name || '') + '|' + (el.form ? [...document.forms].indexOf(el.form) : '');
+        if (!radios.has(k)) radios.set(k, []);
+        radios.get(k).push(el);
+        continue;
+      }
+      if (skippable(el)) continue;
+      let label = labelText(el);
+      if (/^search\b/.test(label)) continue;
+      if (isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
+      const answer = currentAnswer(el);
+      if (!answer) continue;
+      const key = classify(el, label);
+      if (key && (LEARN_SKIP.has(key) || valueFor(key, profile))) continue; // the profile already answers this
+      remember(label, answer);
+    }
+
+    for (const group of radios.values()) {
+      const picked = group.find((r) => r.checked);
+      if (!picked) continue;
+      const q = questionText(group);
+      const key = classify(group[0], q);
+      if (key && (LEARN_SKIP.has(key) || valueFor(key, profile))) continue;
+      remember(q, labelText(picked) || picked.value);
+    }
+
+    await window.JA_PROFILES.save(store.profiles, store.activeProfileId);
+    return learned;
+  };
+
+  // ---- Troubleshooting report: what the extension sees, without your typed text ----
+  window.__jobAutofillReport = async function () {
+    const p = (await window.JA_PROFILES.active()) || {};
+    const fields = [];
+    for (const el of collect(document, [])) {
+      const isListbox = isListboxEl(el);
+      const type = isListbox ? 'listbox' : (el.type || '').toLowerCase();
+      if (['hidden', 'submit', 'reset', 'image', 'password'].includes(type) || (type === 'button' && !isListbox)) continue;
+      let label = labelText(el);
+      if (isGeneric(label)) label = (contextBefore(el) + ' ' + label).trim();
+      const key = classify(el, label);
+      const typed = !isListbox && !(el instanceof HTMLSelectElement) && ['text', 'search', 'email', 'tel', 'url', 'number', ''].includes(type);
+      fields.push({
+        tag: el.tagName.toLowerCase(), type, role: el.getAttribute('role') || undefined,
+        popup: el.getAttribute('aria-haspopup') || undefined, id: el.id || undefined,
+        auto: el.getAttribute('data-automation-id') || undefined,
+        cls: (el.className && String(el.className).slice(0, 60)) || undefined,
+        label: label.slice(0, 120), key, profileHasValue: key ? !!valueFor(key, p) : undefined,
+        shown: shown(el), disabled: el.disabled || undefined,
+        current: typed ? (el.value ? `[${el.value.length} chars]` : '') : currentAnswer(el),
+        options: el instanceof HTMLSelectElement ? [...el.options].slice(0, 15).map((o) => o.text.trim()) : undefined,
+        heading: sectionHeading(el).slice(0, 60) || undefined,
+      });
+    }
+    return { page: location.origin + location.pathname, topFrame: window === window.top, fields: fields.slice(0, 250) };
   };
 })();
