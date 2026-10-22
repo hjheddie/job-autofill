@@ -358,7 +358,7 @@ function transitionsHtml(s) {
       <td>${closeness(x.meters)} <span class="muted">${dist}</span></td><td>${x.walk} min</td><td>${x.gap} min</td>
       <td class="delta ${cls}">${!x.known ? '–' : x.slack < 0 ? `${-x.slack} min late` : `${x.slack} min spare`}</td></tr>`;
   }).join('');
-  return `<details class="panelbox" open><summary><b>Between classes</b> <span class="muted small">how close back-to-back classes are, and the time left after walking</span></summary>
+  return `<details class="panelbox"><summary><b>Between classes</b> <span class="muted small">how close back-to-back classes are, and the time left after walking</span></summary>
     <table class="sched"><thead><tr><th>Day</th><th>From → to</th><th>Closeness</th><th>Walk</th><th>Gap</th><th>Slack</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
@@ -642,10 +642,9 @@ function detail(s, profSource, idx = -1) {
       <button class="ghost" data-act="map" data-i="${idx}">Map</button>
       <span class="muted small">${summary(s)}${extra}</span></div>
     ${notes.length ? `<div class="notice small">${notes.map(esc).join('<br>')}</div>` : ''}
-    ${transitionsHtml(s)}
     <div id="swaps-${idx}"></div><div id="map-${idx}"></div>
     ${calendar(scheduleBlocks(s), colorFor(s))}
-    <table class="sched"><thead><tr><th>Course</th><th>Sec / CRN</th><th>Meets</th><th>Instructor</th><th title="Lock this section and regenerate"></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="sched"><thead><tr><th>Course</th><th>Sec / CRN</th><th>Meets</th><th>Instructor</th><th title="Lock this section and regenerate"></th></tr></thead><tbody>${rows}</tbody></table>${transitionsHtml(s)}`;
 }
 
 function renderResults() {
