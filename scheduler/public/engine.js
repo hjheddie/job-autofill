@@ -54,18 +54,49 @@ export function components(course) {
 
 const potOverlap = (a, b) => a === b || a === '1' || b === '1';
 
-export function walkMinutes(b1, b2, geo, fallback = 7) {
-  if (!b1 || !b2 || b1 === b2) return b1 && b1 === b2 ? 2 : 0;
+// Estimated walking distance between two buildings (straight line x 1.3), or null if a location is unknown.
+export function distanceMeters(b1, b2, geo) {
   const p = geo?.[b1];
   const q = geo?.[b2];
-  if (!p || !q) return fallback;
+  if (!p || !q) return null;
   const R = 6371000;
   const rad = (x) => (x * Math.PI) / 180;
   const dLat = rad(q.lat - p.lat);
   const dLon = rad(q.lon - p.lon);
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(p.lat)) * Math.cos(rad(q.lat)) * Math.sin(dLon / 2) ** 2;
-  const meters = 2 * R * Math.asin(Math.sqrt(h)) * 1.3; // streets are not straight lines
-  return Math.ceil(meters / 80) + 1; // ~4.8 km/h
+  return 2 * R * Math.asin(Math.sqrt(h)) * 1.3; // streets are not straight lines
+}
+
+export function walkMinutes(b1, b2, geo, fallback = 7) {
+  if (!b1 || !b2 || b1 === b2) return b1 && b1 === b2 ? 2 : 0;
+  const meters = distanceMeters(b1, b2, geo);
+  return meters == null ? fallback : Math.ceil(meters / 80) + 1; // ~4.8 km/h
+}
+
+// Every pair of back-to-back classes on the same day, with how far apart they are and how much slack the gap leaves.
+export function transitions(schedule, geo) {
+  const byDay = {};
+  for (const x of schedule.sections) {
+    for (const m of x.sec.meetings) {
+      if (m.start == null) continue;
+      for (const day of m.days) {
+        (byDay[day] ||= []).push({ day, start: m.start, end: m.end, bld: m.building, room: m.room, course: x.courseKey, type: x.sec.type });
+      }
+    }
+  }
+  const out = [];
+  for (const day of Object.keys(byDay).sort((a, b) => 'MTWRFSU'.indexOf(a) - 'MTWRFSU'.indexOf(b))) {
+    const arr = byDay[day].sort((a, b) => a.start - b.start);
+    for (let i = 1; i < arr.length; i++) {
+      const a = arr[i - 1];
+      const b = arr[i];
+      const gap = b.start - a.end;
+      const walk = walkMinutes(a.bld, b.bld, geo);
+      const meters = a.bld && a.bld === b.bld ? 0 : distanceMeters(a.bld, b.bld, geo);
+      out.push({ day, from: a, to: b, gap, walk, meters, known: meters != null || !a.bld || !b.bld, slack: gap - walk });
+    }
+  }
+  return out;
 }
 
 const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1;

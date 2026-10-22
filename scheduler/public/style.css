@@ -165,3 +165,4 @@ details.panelbox > summary { cursor: pointer; }
 .profs { margin: 8px 0; display: flex; flex-direction: column; gap: 2px; }
 .prof { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; padding: 2px 0; }
 #tab-sections .sec { border-top: 1px dashed var(--line); }
+.delta.warn { color: #b7791f; }

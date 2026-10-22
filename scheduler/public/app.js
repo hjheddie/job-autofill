@@ -1,6 +1,6 @@
 import {
   DAYS, DAY_NAMES, GRID_START, STEP, ROWS, emptyGrid, defaultPrefs, prepareCourse, components,
-  generate, alternatives, buildSchedule, walkMinutes, fmtTime, fmtDuration, toICS, profKey,
+  generate, alternatives, buildSchedule, walkMinutes, transitions, fmtTime, fmtDuration, toICS, profKey,
 } from './engine.js';
 import { checkPrereq, normCodes } from './prereq.js';
 
@@ -335,7 +335,31 @@ function profBadges(c, inst) {
 
 function meetingText(m) {
   if (m.start == null) return 'Time TBA / online';
-  return `${m.days} ${fmtTime(m.start)}–${fmtTime(m.end)}${m.building ? ` · ${m.building}` : ''}`;
+  return `${m.days} ${fmtTime(m.start)}–${fmtTime(m.end)}${m.building ? ` · ${m.building}${m.room ? ` ${m.room}` : ''}` : ''}`;
+}
+
+function closeness(meters) {
+  if (meters == null) return 'unknown';
+  if (meters === 0) return 'same building';
+  if (meters < 150) return 'next door';
+  if (meters < 400) return 'close';
+  if (meters < 800) return 'a walk';
+  return 'far';
+}
+
+function transitionsHtml(s) {
+  const t = transitions(s, geo);
+  if (!t.length) return '';
+  const rows = t.map((x) => {
+    const cls = !x.known ? '' : x.slack < 0 ? 'down' : x.slack < 5 ? 'warn' : 'up';
+    const dist = x.meters == null ? 'location not found yet' : x.meters === 0 ? '–' : `${Math.round(x.meters)} m`;
+    return `<tr><td>${DAY_NAMES[x.day]}</td>
+      <td>${esc(x.from.course)} <span class="muted">${esc(x.from.bld)} ${esc(x.from.room)}</span> → ${esc(x.to.course)} <span class="muted">${esc(x.to.bld)} ${esc(x.to.room)}</span></td>
+      <td>${closeness(x.meters)} <span class="muted">${dist}</span></td><td>${x.walk} min</td><td>${x.gap} min</td>
+      <td class="delta ${cls}">${!x.known ? '–' : x.slack < 0 ? `${-x.slack} min late` : `${x.slack} min spare`}</td></tr>`;
+  }).join('');
+  return `<details class="panelbox" open><summary><b>Between classes</b> <span class="muted small">how close back-to-back classes are, and the time left after walking</span></summary>
+    <table class="sched"><thead><tr><th>Day</th><th>From → to</th><th>Closeness</th><th>Walk</th><th>Gap</th><th>Slack</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
 function sectionRow(c, s) {
@@ -563,7 +587,7 @@ function calendar(blocks, colorOf) {
       const top = Math.max(0, (b.start - GRID_START) * px);
       const h = Math.max(14, (b.end - b.start) * px - 1);
       return `<div class="block" style="top:${top}px;height:${h}px;background:${colorOf(b.courseKey)}">
-        <b>${esc(b.courseKey)} ${esc(b.type)}</b>${fmtTime(b.start)}–${fmtTime(b.end).replace(/ [AP]M/, '')}<br>${esc(b.bld)}</div>`;
+        <b>${esc(b.courseKey)} ${esc(b.type)}</b>${fmtTime(b.start)}–${fmtTime(b.end).replace(/ [AP]M/, '')}<br>${esc(b.bld)} ${esc(b.room)}</div>`;
     }).join('')}</div>`).join('')}</div>`;
 }
 
@@ -572,7 +596,7 @@ function calendar(blocks, colorOf) {
 function scheduleBlocks(s) {
   return s.sections.flatMap((x) => x.sec.meetings.flatMap((m) =>
     m.start == null ? [] : [...m.days].map((day) => ({
-      day, start: m.start, end: m.end, courseKey: x.courseKey, type: x.sec.type, bld: m.building,
+      day, start: m.start, end: m.end, courseKey: x.courseKey, type: x.sec.type, bld: m.building, room: m.room,
     }))));
 }
 
@@ -618,6 +642,7 @@ function detail(s, profSource, idx = -1) {
       <button class="ghost" data-act="map" data-i="${idx}">Map</button>
       <span class="muted small">${summary(s)}${extra}</span></div>
     ${notes.length ? `<div class="notice small">${notes.map(esc).join('<br>')}</div>` : ''}
+    ${transitionsHtml(s)}
     <div id="swaps-${idx}"></div><div id="map-${idx}"></div>
     ${calendar(scheduleBlocks(s), colorFor(s))}
     <table class="sched"><thead><tr><th>Course</th><th>Sec / CRN</th><th>Meets</th><th>Instructor</th><th title="Lock this section and regenerate"></th></tr></thead><tbody>${rows}</tbody></table>`;
