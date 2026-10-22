@@ -1,15 +1,14 @@
-// Local data server for the scheduler: serves the UI and proxies/caches
-// Course Explorer, Rate My Professors, the UIUC GPA dataset and building geocoding.
-import http from 'node:http';
+// Data layer for the scheduler: proxies/caches Course Explorer, Rate My Professors,
+// the UIUC GPA dataset and building geocoding. Shared by dev-server.js and api/index.js.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC = path.join(__dirname, 'public');
-const CACHE = path.join(__dirname, '.cache');
-const PORT = Number(process.env.PORT) || 3000;
+const DATA = path.join(__dirname, 'data'); // precomputed datasets committed to the repo
+// Vercel's filesystem is read-only except /tmp.
+const CACHE = process.env.VERCEL ? '/tmp/illini-cache' : path.join(__dirname, '.cache');
 const CIS = 'https://courses.illinois.edu/cisapp/explorer/schedule';
 const GPA_URL = 'https://raw.githubusercontent.com/wadefagen/datasets/main/gpa/uiuc-gpa-dataset.csv';
 const RMP_SCHOOL = 'U2Nob29sLTExMTI='; // base64 "School-1112" (UIUC)
@@ -178,10 +177,50 @@ function splitCsv(line) {
   return out;
 }
 
+export function buildGpaIndex(text) {
+  const minYear = new Date().getFullYear() - 5;
+  const byCourseProf = new Map();
+  const byCourse = new Map();
+  const add = (map, key, pts, n) => {
+    const e = map.get(key) || { pts: 0, n: 0 };
+    e.pts += pts;
+    e.n += n;
+    map.set(key, e);
+  };
+  for (const line of text.split('\n').slice(1)) {
+    if (!line) continue;
+    const f = splitCsv(line.replace(/\r$/, ''));
+    if (Number(f[0]) < minYear) continue;
+    let pts = 0;
+    let n = 0;
+    for (let g = 0; g < 13; g++) {
+      const c = Number(f[7 + g]) || 0;
+      pts += c * GRADE_POINTS[g];
+      n += c;
+    }
+    if (!n) continue;
+    const course = `${f[3]} ${f[4]}`;
+    const [last, rest = ''] = f[22].split(',');
+    add(byCourseProf, `${course}|${norm(last)}|${norm(rest)[0] || ''}`, pts, n);
+    add(byCourse, course, pts, n);
+  }
+  return { byCourseProf, byCourse };
+}
+
+export const serializeGpa = (idx) => Object.fromEntries(Object.entries(idx).map(([k, m]) =>
+  [k, [...m].map(([key, e]) => [key, Math.round(e.pts * 100) / 100, e.n])]));
+
+const hydrateGpa = (json) => Object.fromEntries(Object.entries(json).map(([k, rows]) =>
+  [k, new Map(rows.map(([key, pts, n]) => [key, { pts, n }]))]));
+
 let gpaPromise = null;
 
+// Prefers the snapshot in data/gpa.json (npm run build-data); falls back to downloading the CSV.
 function loadGpa() {
   gpaPromise ||= (async () => {
+    try {
+      return hydrateGpa(JSON.parse(await fsp.readFile(path.join(DATA, 'gpa.json'), 'utf8')));
+    } catch {}
     const file = path.join(CACHE, 'gpa.csv');
     let text;
     try {
@@ -193,36 +232,7 @@ function loadGpa() {
       await fsp.mkdir(CACHE, { recursive: true });
       await fsp.writeFile(file, text);
     }
-    const minYear = new Date().getFullYear() - 5;
-    const byCourseProf = new Map();
-    const byProf = new Map();
-    const byCourse = new Map();
-    const add = (map, key, pts, n) => {
-      const e = map.get(key) || { pts: 0, n: 0 };
-      e.pts += pts;
-      e.n += n;
-      map.set(key, e);
-    };
-    for (const line of text.split('\n').slice(1)) {
-      if (!line) continue;
-      const f = splitCsv(line.replace(/\r$/, ''));
-      if (Number(f[0]) < minYear) continue;
-      let pts = 0;
-      let n = 0;
-      for (let g = 0; g < 13; g++) {
-        const c = Number(f[7 + g]) || 0;
-        pts += c * GRADE_POINTS[g];
-        n += c;
-      }
-      if (!n) continue;
-      const course = `${f[3]} ${f[4]}`;
-      const [last, rest = ''] = f[22].split(',');
-      const prof = `${norm(last)}|${norm(rest)[0] || ''}`;
-      add(byCourseProf, `${course}|${prof}`, pts, n);
-      add(byProf, prof, pts, n);
-      add(byCourse, course, pts, n);
-    }
-    return { byCourseProf, byProf, byCourse };
+    return buildGpaIndex(text);
   })().catch((err) => {
     gpaPromise = null; // retry on next request
     throw err;
@@ -303,11 +313,12 @@ async function instructorInfo({ subject, subjectLabel, number, instructors }) {
 // ---------- Building geocoding (OpenStreetMap Nominatim, 1 request/sec) ----------
 
 const geoFile = path.join(CACHE, 'geo.json');
-let geo = {};
-try { geo = JSON.parse(fs.readFileSync(geoFile, 'utf8')); } catch {}
-const geoPending = new Set();
+const geo = {};
+for (const f of [path.join(DATA, 'geo.json'), geoFile]) {
+  try { Object.assign(geo, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch {}
+}
 const geoFailed = new Set();
-let geoRunning = false;
+const GEO_BATCH = 5; // serverless requests are short; the client polls for the rest
 
 async function nominatim(name) {
   for (const q of [name, `${name}, Urbana`]) {
@@ -320,53 +331,31 @@ async function nominatim(name) {
   return null;
 }
 
-async function geoWorker() {
-  if (geoRunning) return;
-  geoRunning = true;
-  try {
-    while (geoPending.size) {
-      const name = geoPending.values().next().value;
-      geoPending.delete(name);
-      try {
-        geo[name] = await nominatim(name);
-        await fsp.mkdir(CACHE, { recursive: true });
-        await fsp.writeFile(geoFile, JSON.stringify(geo));
-      } catch {
-        geoFailed.add(name);
-      }
-      await sleep(1100);
-    }
-  } finally {
-    geoRunning = false;
-  }
-}
-
-function geoRequest(names) {
+async function geoRequest(names) {
   const results = {};
+  const todo = [];
   for (const n of names) {
     if (n in geo) results[n] = geo[n];
-    else if (!geoFailed.has(n)) geoPending.add(n);
+    else if (!geoFailed.has(n)) todo.push(n);
   }
-  if (geoPending.size) geoWorker();
-  return { results, pending: geoPending.size + (geoRunning ? 1 : 0) };
+  for (const n of todo.slice(0, GEO_BATCH)) {
+    try {
+      geo[n] = await nominatim(n);
+      results[n] = geo[n];
+      await fsp.mkdir(CACHE, { recursive: true });
+      await fsp.writeFile(geoFile, JSON.stringify(geo));
+    } catch {
+      geoFailed.add(n);
+    }
+    await sleep(1100);
+  }
+  return { results, pending: Math.max(0, todo.length - GEO_BATCH) };
 }
 
-// ---------- HTTP ----------
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-};
-
-const send = (res, status, body, type = 'application/json') => {
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
-  res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
-};
-
 const readBody = (req) => new Promise((resolve, reject) => {
+  if (req.body !== undefined) { // already parsed by the platform
+    try { return resolve(typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}); } catch (e) { return reject(e); }
+  }
   let data = '';
   req.on('data', (c) => { data += c; if (data.length > 1e6) req.destroy(); });
   req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch (e) { reject(e); } });
@@ -378,7 +367,7 @@ function check(re, v, what) {
   return v;
 }
 
-async function api(req, url) {
+export async function api(req, url) {
   const q = url.searchParams;
   switch (url.pathname) {
     case '/api/subjects':
@@ -405,22 +394,3 @@ async function api(req, url) {
   }
 }
 
-http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  if (url.pathname.startsWith('/api/')) {
-    try {
-      send(res, 200, await api(req, url));
-    } catch (err) {
-      send(res, err.status || 502, { error: err.message });
-    }
-    return;
-  }
-  const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
-  const file = path.join(PUBLIC, rel);
-  if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'forbidden', 'text/plain');
-  try {
-    send(res, 200, await fsp.readFile(file), MIME[path.extname(file)] || 'application/octet-stream');
-  } catch {
-    send(res, 404, 'not found', 'text/plain');
-  }
-}).listen(PORT, () => console.log(`Scheduler running at http://localhost:${PORT}`));
