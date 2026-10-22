@@ -9,12 +9,18 @@
 <body>
 <header class="top">
   <h1>Illini Scheduler</h1>
-  <div class="term">
-    <select id="season">
-      <option value="spring">Spring</option><option value="summer">Summer</option>
-      <option value="fall">Fall</option><option value="winter">Winter</option>
-    </select>
-    <input id="year" type="number" min="2015" max="2040" aria-label="Year">
+  <div class="top-actions">
+    <button class="ghost" id="shareSetup" title="Copy a link to your courses, breaks and preferences">Share setup</button>
+    <button class="ghost" id="backup" title="Download everything as a file you can restore on another device">Backup</button>
+    <button class="ghost" id="restore">Restore</button>
+    <input type="file" id="restoreFile" accept="application/json" hidden>
+    <div class="term">
+      <select id="season">
+        <option value="spring">Spring</option><option value="summer">Summer</option>
+        <option value="fall">Fall</option><option value="winter">Winter</option>
+      </select>
+      <input id="year" type="number" min="2015" max="2040" aria-label="Year">
+    </div>
   </div>
 </header>
 
@@ -27,6 +33,10 @@
         <div id="suggest" class="suggest" hidden></div>
       </div>
       <div id="courses"></div>
+      <label class="taken">
+        <span class="small muted">Courses I've taken (for prerequisite checks)</span>
+        <input id="taken" placeholder="e.g. CS 124, MATH 220, RHET 105" spellcheck="false">
+      </label>
     </section>
 
     <section class="panel">
@@ -42,12 +52,18 @@
   <section class="content">
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="breaks" class="on">Breaks</button>
+      <button role="tab" data-tab="sections">Sections &amp; professors</button>
       <button role="tab" data-tab="results">Schedules <span id="resultCount"></span></button>
       <button role="tab" data-tab="saved">Saved <span id="savedCount"></span></button>
+      <button role="tab" data-tab="browse">Browse courses</button>
+      <button role="tab" data-tab="register">Registration day</button>
     </nav>
     <div id="tab-breaks" class="tabpane"></div>
+    <div id="tab-sections" class="tabpane" hidden></div>
     <div id="tab-results" class="tabpane" hidden></div>
     <div id="tab-saved" class="tabpane" hidden></div>
+    <div id="tab-browse" class="tabpane" hidden></div>
+    <div id="tab-register" class="tabpane" hidden></div>
   </section>
 </main>
 

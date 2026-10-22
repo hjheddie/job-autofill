@@ -82,18 +82,47 @@ const firstNumber = (s) => {
   return m ? parseFloat(m[0]) : 0;
 };
 
-function parseCourse(xml, subject, number) {
-  const sectionsStart = xml.indexOf('<detailedSections>');
-  const head = sectionsStart < 0 ? xml : xml.slice(0, sectionsStart);
-  const course = {
+// "Prerequisite: CS 126 or CS 128; MATH 220. Credit is not given..." -> "CS 126 or CS 128; MATH 220"
+export function extractPrereq(text) {
+  const m = /Prerequisites?:\s*/i.exec(text || '');
+  if (!m) return '';
+  const rest = text.slice(m.index + m[0].length);
+  const end = rest.search(/\.\s+(?=[A-Z])/);
+  return (end < 0 ? rest : rest.slice(0, end)).replace(/\.$/, '').trim();
+}
+
+function parseHead(head, subject, number) {
+  return {
     key: `${subject} ${number}`,
     subject,
     number,
     title: tag(head, 'label'),
     description: tag(head, 'description'),
     credits: firstNumber(tag(head, 'creditHours')),
-    sections: [],
+    genEd: [...head.matchAll(/<genEdAttribute code="([^"]*)">([^<]*)<\/genEdAttribute>/g)]
+      .map((g) => ({ code: g[1], name: decode(g[2]) })),
+    prereq: extractPrereq(tag(head, 'courseSectionInformation') || tag(head, 'description')),
   };
+}
+
+// One request per subject returns every course; used by scripts/build-index.mjs.
+export function parseCascade(xml, subject) {
+  return [...xml.matchAll(/<cascadingCourse id="[^"]*"[^>]*>([\s\S]*?)<\/cascadingCourse>/g)].map((m) => {
+    const body = m[1];
+    const cut = body.indexOf('<detailedSections>');
+    const head = cut < 0 ? body : body.slice(0, cut);
+    const number = (/<cascadingCourse id="[A-Z]+ (\w+)"/.exec(m[0]) || [])[1];
+    const c = parseHead(head.replace(/<parents>[\s\S]*?<\/parents>/, ''), subject, number);
+    c.sectionCount = (body.match(/<detailedSection /g) || []).length;
+    c.description = c.description.slice(0, 240);
+    return c;
+  });
+}
+
+function parseCourse(xml, subject, number) {
+  const sectionsStart = xml.indexOf('<detailedSections>');
+  const head = sectionsStart < 0 ? xml : xml.slice(0, sectionsStart);
+  const course = { ...parseHead(head, subject, number), sections: [] };
   for (const m of xml.matchAll(/<detailedSection id="(\d+)"[^>]*>([\s\S]*?)<\/detailedSection>/g)) {
     const body = m[2].replace(/<parents>[\s\S]*?<\/parents>/, '');
     const meetings = [];
@@ -127,7 +156,8 @@ function parseCourse(xml, subject, number) {
       startDate: parseDate(tag(body, 'startDate')),
       endDate: parseDate(tag(body, 'endDate')),
       credits: firstNumber(tag(bodyNoMeetings, 'creditHours')) || null,
-      notes: [tag(body, 'sectionText'), tag(body, 'sectionNotes'), tag(body, 'sectionCappArea')]
+      title: tag(body, 'sectionTitle'),
+      notes: [tag(body, 'sectionText'), tag(body, 'sectionNotes'), tag(body, 'sectionCappArea'), tag(body, 'sectionRegistrationNotes')]
         .filter(Boolean).join(' '),
       meetings,
       instructors,
@@ -181,10 +211,12 @@ export function buildGpaIndex(text) {
   const minYear = new Date().getFullYear() - 5;
   const byCourseProf = new Map();
   const byCourse = new Map();
-  const add = (map, key, pts, n) => {
-    const e = map.get(key) || { pts: 0, n: 0 };
+  const add = (map, key, pts, n, a, w) => {
+    const e = map.get(key) || { pts: 0, n: 0, a: 0, w: 0 };
     e.pts += pts;
     e.n += n;
+    e.a += a;
+    e.w += w;
     map.set(key, e);
   };
   for (const line of text.split('\n').slice(1)) {
@@ -193,25 +225,28 @@ export function buildGpaIndex(text) {
     if (Number(f[0]) < minYear) continue;
     let pts = 0;
     let n = 0;
+    let a = 0;
     for (let g = 0; g < 13; g++) {
       const c = Number(f[7 + g]) || 0;
       pts += c * GRADE_POINTS[g];
       n += c;
+      if (g < 3) a += c; // A+, A, A-
     }
     if (!n) continue;
+    const w = Number(f[20]) || 0;
     const course = `${f[3]} ${f[4]}`;
     const [last, rest = ''] = f[22].split(',');
-    add(byCourseProf, `${course}|${norm(last)}|${norm(rest)[0] || ''}`, pts, n);
-    add(byCourse, course, pts, n);
+    add(byCourseProf, `${course}|${norm(last)}|${norm(rest)[0] || ''}`, pts, n, a, w);
+    add(byCourse, course, pts, n, a, w);
   }
   return { byCourseProf, byCourse };
 }
 
 export const serializeGpa = (idx) => Object.fromEntries(Object.entries(idx).map(([k, m]) =>
-  [k, [...m].map(([key, e]) => [key, Math.round(e.pts * 100) / 100, e.n])]));
+  [k, [...m].map(([key, e]) => [key, Math.round(e.pts * 100) / 100, e.n, e.a, e.w])]));
 
 const hydrateGpa = (json) => Object.fromEntries(Object.entries(json).map(([k, rows]) =>
-  [k, new Map(rows.map(([key, pts, n]) => [key, { pts, n }]))]));
+  [k, new Map(rows.map(([key, pts, n, a, w]) => [key, { pts, n, a, w }]))]));
 
 let gpaPromise = null;
 
@@ -243,7 +278,13 @@ function loadGpa() {
 function gpaLookup(idx, subject, number, last, first) {
   const course = `${subject} ${number}`;
   const prof = `${norm(last)}|${norm(first)[0] || ''}`;
-  const out = (e, scope) => ({ gpa: Math.round((e.pts / e.n) * 100) / 100, n: e.n, scope });
+  const out = (e, scope) => ({
+    gpa: Math.round((e.pts / e.n) * 100) / 100,
+    n: e.n,
+    scope,
+    aRate: Math.round((e.a / e.n) * 1000) / 1000,
+    wRate: Math.round((e.w / (e.n + e.w)) * 1000) / 1000,
+  });
   const cp = idx.byCourseProf.get(`${course}|${prof}`);
   if (cp && cp.n >= 10) return out(cp, 'course+prof');
   const c = idx.byCourse.get(course);

@@ -1,6 +1,7 @@
 // Runs the engine against live data from the local server (npm start must be running).
 import assert from 'node:assert/strict';
-import { generate, prepareCourse, defaultPrefs, emptyGrid, toICS, ROWS } from '../public/engine.js';
+import { generate, alternatives, buildSchedule, components, prepareCourse, defaultPrefs, emptyGrid, toICS, ROWS } from '../public/engine.js';
+import { parsePrereq, checkPrereq, normCodes } from '../public/prereq.js';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
 const term = '2027/spring';
@@ -61,6 +62,50 @@ const ics = toICS(base.schedules[0]);
 assert.match(ics, /BEGIN:VCALENDAR/);
 assert.match(ics, /RRULE:FREQ=WEEKLY;UNTIL=20270505T235959/);
 assert.equal(ROWS, 28);
+
+// pins: locking a section forces it into every result
+const pinned = structuredClone(courses);
+const mathC = pinned.find((c) => c.key === 'MATH 231');
+const lockSec = mathC.sections.find((x) => x.comp === 'PRI' && x.slots.length);
+mathC.pins = { PRI: lockSec.crn };
+const pr = generate(pinned, prefs, grid, {});
+assert.ok(pr.schedules.length);
+for (const s of pr.schedules) assert.ok(s.sections.some((x) => x.sec.crn === lockSec.crn));
+
+// links: restrict a lecture's discussions
+const linked = structuredClone(courses);
+const physC = linked.find((c) => c.key === 'PHYS 211');
+const disC = components(physC).find((k) => k.key === 'DIS');
+if (disC) {
+  const lec = physC.sections.find((x) => x.comp === 'PRI' && x.slots.length);
+  const allowedDis = disC.sections.slice(0, 2).map((x) => x.crn);
+  physC.links = { [lec.crn]: { DIS: allowedDis } };
+  const lr = generate(linked, prefs, grid, {});
+  for (const s of lr.schedules) {
+    const hasLec = s.sections.some((x) => x.sec.crn === lec.crn);
+    const dis = s.sections.find((x) => x.courseKey === 'PHYS 211' && x.comp === 'DIS');
+    if (hasLec && dis) assert.ok(allowedDis.includes(dis.sec.crn), 'link respected');
+  }
+}
+
+// alternatives: swaps keep the schedule valid and are sorted by score delta
+const alts = alternatives(courses, base.schedules[0], prefs, grid, {});
+assert.ok(alts && alts.length, 'alternatives computed');
+for (const a of alts) for (let i = 1; i < a.options.length; i++) assert.ok(a.options[i - 1].delta >= a.options[i].delta);
+const rebuilt = buildSchedule(courses, base.schedules[0].sections.map((x) => x.sec.crn), prefs, grid, {});
+assert.ok(Math.abs(rebuilt.score - base.schedules[0].score) < 1e-6, 'buildSchedule matches generate');
+
+// duplicate collapsing: no two results share a signature
+const sigs = new Set(base.schedules.map((s) => s.sections.map((x) => x.sec.crn).sort().join()));
+assert.equal(sigs.size, base.schedules.length);
+
+// prerequisites
+assert.deepEqual(normCodes('cs124, Math 231 and ece220'), ['CS 124', 'MATH 231', 'ECE 220']);
+const pq = parsePrereq('CS 126 or CS 128 or ECE 220; One of CS 173, MATH 213; consent of instructor');
+assert.equal(pq.groups.length, 2);
+assert.deepEqual(pq.other, ['consent of instructor']);
+assert.equal(checkPrereq('CS 126 or CS 128; MATH 220', new Set(['CS 128'])).unmet.length, 1);
+assert.ok(checkPrereq('CS 126 or CS 128', new Set(['CS 128'])).ok);
 
 console.log('best:', base.schedules[0].sections.map((x) => `${x.courseKey} ${x.sec.number}`).join(', '));
 console.log('all engine tests passed');
