@@ -16,7 +16,7 @@ npm test       # engine tests against live data; needs the server running
   years), easier courses (RMP difficulty and share of A grades), preferred-free times, gaps,
   days on campus, and an early/late preference.
 - **Lock a section** so every schedule uses it, and **link** lectures to the discussions or
-  labs that go with them (Course Explorer does not publish that pairing).
+  labs that go with them (inferred from section letters, overridable by hand).
 - **Guided search** (best sections first, then hill-climbing from the best results and random
   starts) runs in a web worker, and collapses interchangeable duplicates.
 - **Swaps & backups:** for each section, the best replacements if it fills, with score change.
@@ -35,7 +35,8 @@ npm test       # engine tests against live data; needs the server running
 - No live seat counts: Course Explorer does not publish open/closed status, and Banner
   needs a login. Use "exclude" on a section you know is full, or the swaps panel.
 - No final-exam conflict warnings: the exam schedule is not in Course Explorer.
-- Lecture-to-discussion pairing is manual (Link…); the app cannot infer it.
+- Lecture-to-discussion pairing is inferred from matching section letters (CS 173: AL* with AD*, BL* with BD*)
+  only where that convention clearly holds; otherwise use Link… by hand. Course Explorer does not publish the real rules.
 - Prerequisite checking reads catalog prose; "and/or" structure and non-course requirements
   (standing, consent) are approximated. Treat it as a warning, not an audit.
 - Saved schedules live in your browser; use Share link or Backup to move them between devices.

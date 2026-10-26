@@ -1,6 +1,6 @@
 // Runs the engine against live data from the local server (npm start must be running).
 import assert from 'node:assert/strict';
-import { generate, alternatives, buildSchedule, components, prepareCourse, defaultPrefs, emptyGrid, toICS, ROWS } from '../public/engine.js';
+import { generate, alternatives, inferLinks, effectiveLinks, buildSchedule, components, prepareCourse, defaultPrefs, emptyGrid, toICS, ROWS } from '../public/engine.js';
 import { parsePrereq, checkPrereq, normCodes } from '../public/prereq.js';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
@@ -106,6 +106,30 @@ assert.equal(pq.groups.length, 2);
 assert.deepEqual(pq.other, ['consent of instructor']);
 assert.equal(checkPrereq('CS 126 or CS 128; MATH 220', new Set(['CS 128'])).unmet.length, 1);
 assert.ok(checkPrereq('CS 126 or CS 128', new Set(['CS 128'])).ok);
+
+// auto links from section letters (CS 173: lectures A* go with discussions A*, B* with B*)
+const cs173 = prepareCourse(await get(`/api/course?term=${term}&subject=CS&number=173`));
+const lecA = cs173.sections.find((x) => x.number === 'AL1');
+const lecB = cs173.sections.find((x) => x.number === 'BL1');
+const allowedA = effectiveLinks(cs173, lecA.crn, 'DIS');
+assert.ok(allowedA.length && allowedA.every((crn) => cs173.sections.find((x) => x.crn === crn).number.startsWith('A')));
+assert.ok(effectiveLinks(cs173, lecB.crn, 'DIS').every((crn) => cs173.sections.find((x) => x.crn === crn).number.startsWith('B')));
+const g173 = generate([cs173], prefs, grid, {});
+assert.ok(g173.schedules.length);
+for (const s of g173.schedules) {
+  const lec = s.sections.find((x) => x.comp === 'PRI').sec.number[0];
+  assert.equal(s.sections.find((x) => x.comp === 'DIS').sec.number[0], lec, 'discussion matches lecture group');
+}
+// manual choice overrides the inferred one; turning auto off removes the restriction
+cs173.links = { [lecA.crn]: { DIS: [cs173.sections.find((x) => x.number === 'BDA').crn] } };
+assert.deepEqual(effectiveLinks(cs173, lecA.crn, 'DIS'), [cs173.sections.find((x) => x.number === 'BDA').crn]);
+cs173.links = {}; cs173.autoLinkOff = true;
+assert.equal(effectiveLinks(cs173, lecA.crn, 'DIS'), undefined);
+// courses with a single letter or different conventions get no inferred links
+for (const [subj, num] of [['CS', '124'], ['PHYS', '211'], ['CS', '233']]) {
+  const c = prepareCourse(await get(`/api/course?term=${term}&subject=${subj}&number=${num}`));
+  assert.equal(Object.keys(inferLinks(c)).length, 0, `${subj} ${num} not guessed`);
+}
 
 console.log('best:', base.schedules[0].sections.map((x) => `${x.courseKey} ${x.sec.number}`).join(', '));
 console.log('all engine tests passed');

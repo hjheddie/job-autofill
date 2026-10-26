@@ -1,6 +1,6 @@
 import {
   DAYS, DAY_NAMES, GRID_START, STEP, ROWS, emptyGrid, defaultPrefs, prepareCourse, components,
-  generate, alternatives, buildSchedule, walkMinutes, transitions, fmtTime, fmtDuration, toICS, profKey,
+  generate, alternatives, buildSchedule, effectiveLinks, walkMinutes, transitions, fmtTime, fmtDuration, toICS, profKey,
 } from './engine.js';
 import { checkPrereq, normCodes } from './prereq.js';
 
@@ -53,7 +53,7 @@ function applyState(s) {
   state.prefs = { ...defaultPrefs(), ...s.prefs, w: { ...defaultPrefs().w, ...s.prefs?.w } };
   state.courses = (s.courses || []).map((c) => ({
     key: c.key, subject: c.subject, number: c.number,
-    skip: c.skip || {}, excluded: c.excluded || {}, pins: c.pins || {}, links: c.links || {},
+    skip: c.skip || {}, excluded: c.excluded || {}, pins: c.pins || {}, links: c.links || {}, autoLinkOff: !!c.autoLinkOff,
   }));
 }
 
@@ -61,7 +61,7 @@ function snapshot() {
   return {
     year: state.year, season: state.season, grid: state.grid, prefs: state.prefs, saved: state.saved,
     taken: state.taken, reg: state.reg,
-    courses: state.courses.map(({ key, subject, number, skip, excluded, pins, links }) => ({ key, subject, number, skip, excluded, pins, links })),
+    courses: state.courses.map(({ key, subject, number, skip, excluded, pins, links, autoLinkOff }) => ({ key, subject, number, skip, excluded, pins, links, autoLinkOff })),
   };
 }
 
@@ -201,9 +201,9 @@ async function fetchCourse(c) {
   renderCourses();
   try {
     const data = prepareCourse(await api(`/api/course?term=${term()}&subject=${c.subject}&number=${c.number}`));
-    const { skip, excluded, pins, links } = c;
+    const { skip, excluded, pins, links, autoLinkOff } = c;
     Object.assign(c, data, { loading: false });
-    Object.assign(c, { skip: skip || {}, excluded: excluded || {}, pins: pins || {}, links: links || {} });
+    Object.assign(c, { skip: skip || {}, excluded: excluded || {}, pins: pins || {}, links: links || {}, autoLinkOff: !!autoLinkOff });
     renderCourses();
     const uniq = [...new Map(c.sections.flatMap((s) => s.instructors).map((i) => [profKey(i), i])).values()];
     c.profs = await api('/api/instructors', {
@@ -316,6 +316,7 @@ function renderSections() {
       return `<details class="panelbox" ${attrs} ${c.openSections === false ? '' : 'open'}>
         <summary><b>${esc(c.key)}</b> ${esc(c.title)} <span class="muted small">· ${selectedCount(c)}/${c.sections.length} sections selected</span>
           <span style="float:right"><button class="mini" data-act="selAll" data-val="1" ${attrs}>Select all</button><button class="mini" data-act="selAll" data-val="0" ${attrs}>Select none</button></span></summary>
+        ${Object.keys(c.autoLinks || {}).length ? `<label class="small"><input type="checkbox" data-act="autolink" ${attrs} ${c.autoLinkOff ? '' : 'checked'}> Match discussions/labs to lectures by section letter (A with A, B with B). Untick if this course does not work that way.</label>` : ''}
         <div class="profs"><div class="small muted">Professors</div>${profs}</div>${comps}</details>`;
     }).join('');
   for (const box of el.querySelectorAll('[data-tri="2"]')) box.indeterminate = true;
@@ -367,13 +368,20 @@ function sectionRow(c, s) {
   const pinned = c.pins[s.comp] === s.crn;
   const hasSecondary = components(c).length > 1;
   const attrs = `data-key="${esc(c.key)}" data-crn="${s.crn}" data-comp="${s.comp}"`;
+  const manual = !!c.links[s.crn];
+  const auto = !manual && components(c).some((k) => k.key !== 'PRI' && effectiveLinks(c, s.crn, k.key));
   const linkBtn = s.comp === 'PRI' && hasSecondary
-    ? `<button class="mini ${c.links[s.crn] ? 'on' : ''}" data-act="linkedit" ${attrs} title="Limit which discussions/labs can go with this lecture">${c.links[s.crn] ? 'Linked ✓' : 'Link…'}</button>` : '';
+    ? `<button class="mini ${manual || auto ? 'on' : ''}" data-act="linkedit" ${attrs} title="Limit which discussions/labs can go with this lecture">${manual ? 'Linked ✓' : auto ? 'Auto-linked' : 'Link…'}</button>` : '';
+  const goesWith = s.comp === 'PRI' ? components(c).filter((k) => k.key !== 'PRI').map((k) => {
+    const ids = effectiveLinks(c, s.crn, k.key);
+    return ids ? `<div class="meta">${esc(k.label)} for this lecture: ${ids.map((id) => esc(c.sections.find((x) => x.crn === id)?.number || id)).join(', ')}</div>` : '';
+  }).join('') : '';
   return `<div class="sec ${pinned ? 'locked' : ''}">
     <input type="checkbox" data-act="include" ${attrs} ${c.excluded[s.crn] ? '' : 'checked'} aria-label="Include section ${esc(s.number)}">
     <div><b>${esc(s.number)}</b> <span class="muted">CRN ${s.crn}</span>
     <button class="mini ${pinned ? 'on' : ''}" data-act="${pinned ? 'unpin' : 'pin'}" ${attrs} title="Make every schedule use this section">${pinned ? '🔓 Unlock' : '🔒 Lock'}</button>${linkBtn}<br>
     ${s.meetings.map((m) => esc(meetingText(m))).join('<br>')}<br>${profs || '<span class="muted">Staff</span>'}
+    ${goesWith}
     ${s.title ? `<div class="meta">${esc(s.title)}</div>` : ''}
     ${s.notes ? `<div class="meta">${esc(s.notes.slice(0, 160))}</div>` : ''}
     ${c.linkEdit === s.crn ? linkEditor(c, s) : ''}</div></div>`;
@@ -381,7 +389,7 @@ function sectionRow(c, s) {
 
 function linkEditor(c, p) {
   return `<div class="linkbox">${components(c).filter((k) => k.key !== 'PRI').map((comp) => {
-    const allowed = c.links[p.crn]?.[comp.key];
+    const allowed = effectiveLinks(c, p.crn, comp.key);
     return `<div class="small"><b>${esc(comp.label)}</b> allowed with ${esc(p.number)}:<br>${comp.sections.map((s) =>
       `<label><input type="checkbox" data-act="linkset" data-key="${esc(c.key)}" data-primary="${p.crn}" data-comp="${comp.key}" data-crn="${s.crn}" ${!allowed || allowed.includes(s.crn) ? 'checked' : ''}> ${esc(s.number)} ${esc(s.meetings[0] ? meetingText(s.meetings[0]).split(' · ')[0] : '')}</label>`).join('')}</div>`;
   }).join('')}</div>`;
@@ -391,6 +399,7 @@ function onCoursesChange(e) {
   const el = e.target;
   const c = state.courses.find((x) => x.key === el.dataset.key);
   if (!c) return;
+  if (el.dataset.act === 'autolink') c.autoLinkOff = !el.checked;
   if (el.dataset.act === 'needed') c.skip[el.dataset.comp] = !el.checked;
   if (el.dataset.act === 'include') c.excluded[el.dataset.crn] = !el.checked;
   if (el.dataset.act === 'profToggle') {
@@ -403,7 +412,9 @@ function onCoursesChange(e) {
       .filter((b) => b.dataset.key === c.key && b.dataset.primary === el.dataset.primary && b.dataset.comp === el.dataset.comp);
     const allowed = boxes.filter((b) => b.checked).map((b) => b.dataset.crn);
     const entry = c.links[el.dataset.primary] ||= {};
-    if (allowed.length === boxes.length) delete entry[el.dataset.comp]; else entry[el.dataset.comp] = allowed;
+    // With an inferred link, "all ticked" must be stored to override it; otherwise it just means no limit.
+    const inferred = !c.autoLinkOff && c.autoLinks?.[el.dataset.primary]?.[el.dataset.comp];
+    if (allowed.length === boxes.length && !inferred) delete entry[el.dataset.comp]; else entry[el.dataset.comp] = allowed;
     if (!Object.keys(entry).length) delete c.links[el.dataset.primary];
   }
   save();

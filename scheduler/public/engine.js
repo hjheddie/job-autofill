@@ -35,9 +35,37 @@ export function prepareCourse(course) {
     s.courseKey = course.key;
   }
   course.profs ||= {};
-  course.links ||= {}; // { [primary CRN]: { [component]: [allowed CRNs] } }
+  course.autoLinks = inferLinks(course);
+  course.links ||= {}; // manual overrides: { [primary CRN]: { [component]: [allowed CRNs] } }
   course.pins ||= {};  // { [component]: CRN } sections the user locked in
   return course;
+}
+
+// Illinois section codes start with a group letter shared by a lecture and its discussions/labs
+// (CS 173: lectures AL1/AL2 go with discussions ADA..ADD, lectures BL1..BL4 with BDA/BDB).
+// Only inferred when every discussion/lab letter is also a lecture letter, so courses with other
+// conventions (PHYS, ECE, CS 233) or a single group are left unrestricted rather than guessed.
+export function inferLinks(course) {
+  const letter = (s) => (s.number || '')[0] || '';
+  const prim = course.sections.filter((s) => s.comp === 'PRI');
+  const groups = new Set(prim.map(letter));
+  const links = {};
+  if (groups.size < 2) return links;
+  for (const comp of components(course)) {
+    if (comp.key === 'PRI') continue;
+    const sGroups = new Set(comp.sections.map(letter));
+    if (![...sGroups].every((g) => groups.has(g))) continue;
+    for (const p of prim) {
+      const match = comp.sections.filter((s) => letter(s) === letter(p));
+      if (match.length) (links[p.crn] ||= {})[comp.key] = match.map((s) => s.crn); // lectures with none stay unrestricted
+    }
+  }
+  return links;
+}
+
+// The discussions/labs allowed with a lecture: the user's manual choice wins over the inferred one.
+export function effectiveLinks(course, primaryCrn, comp) {
+  return course.links?.[primaryCrn]?.[comp] ?? (course.autoLinkOff ? undefined : course.autoLinks?.[primaryCrn]?.[comp]);
 }
 
 // A course is a set of components (lecture, discussion, lab...); you need one section of each.
@@ -143,11 +171,11 @@ function pairConflict(a, b, prefs, geo) {
 // A lecture can be limited to specific discussions/labs via course.links.
 function linkOk(a, b, byKey) {
   if (a.courseKey !== b.courseKey) return true;
-  const links = byKey.get(a.courseKey)?.links;
-  if (!links) return true;
+  const course = byKey.get(a.courseKey);
+  if (!course) return true;
   const [p, s] = a.comp === 'PRI' && b.comp !== 'PRI' ? [a, b] : b.comp === 'PRI' && a.comp !== 'PRI' ? [b, a] : [];
   if (!p) return true;
-  const allowed = links[p.crn]?.[s.comp];
+  const allowed = effectiveLinks(course, p.crn, s.comp);
   return !allowed || allowed.includes(s.crn);
 }
 
