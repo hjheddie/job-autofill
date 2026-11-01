@@ -947,6 +947,7 @@
     const filled = [];
     const unmatched = [];
     const covered = [];
+    await expandSections();
     await ensureRows(p, filled);
     const all = collect(document, []);
     scanHomeFields(all);
@@ -1177,6 +1178,24 @@
     return best;
   }
 
+  // Accordion sections start collapsed, hiding their fields. Open every one that holds form fields
+  // (menus, tabs and dropdown triggers are left alone).
+  async function expandSections() {
+    for (let pass = 0; pass < 3; pass++) {
+      const closed = [...document.querySelectorAll('[aria-expanded="false"], details:not([open]) > summary')].filter((n) => {
+        if (!shown(n) || n.disabled || n.closest('nav, header, [role=menu], [role=listbox], [role=tablist]')) return false;
+        if (n.getAttribute('aria-haspopup') || /^(combobox|tab|menuitem|option)$/.test(n.getAttribute('role') || '')) return false;
+        if (/^(input|select|textarea)$/i.test(n.tagName)) return false;
+        const target = n.tagName === 'SUMMARY' ? n.parentElement : document.getElementById((n.getAttribute('aria-controls') || '').split(' ')[0]);
+        const box = target || n.nextElementSibling || n.parentElement;
+        return !!box && !!box.querySelector('input, select, textarea, [role=combobox], a, button');
+      });
+      if (!closed.length) return;
+      for (const n of closed) { clickLike(n.tagName === 'SUMMARY' ? n : n); await sleep(150); }
+      await sleep(500);
+    }
+  }
+
   // Click "Add" until each section has as many rows as you have saved entries (never more than the cap).
   async function ensureRows(p, filled) {
     for (const def of SF_SECTIONS) {
@@ -1338,6 +1357,7 @@
     const outline = {
       headings: visible('h1, h2, h3, h4, [role=heading], legend, [class*=title i], [class*=heading i]', 40),
       buttons: visible('a, button, [role=button]', 50),
+      collapsed: [...document.querySelectorAll('[aria-expanded="false"]')].filter(shown).map((n) => itemText(n).slice(0, 40)).slice(0, 30),
       hiddenFields: fields.filter((f) => !f.shown).length,
       frames: document.querySelectorAll('iframe').length,
     };
