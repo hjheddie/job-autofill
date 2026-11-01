@@ -281,6 +281,30 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('paged list: found by scrolling, label has extra markup', val(d, 'maj'), 'Mechanical Engineering');
   }
 
+  // ---------- Search results that highlight the typed text (the item's text is split across elements) ----------
+  {
+    const ALL = ['Accounting', 'Biology', 'Chemistry', 'Civil Engineering', 'Computer Science', 'Economics', 'Engineering Mechanics', 'Mechanical Engineering Technology', 'Mechanical Engineering', 'Physics'];
+    const w = loadPage(`<h3>Education</h3>${plain('maj', '* Major', 'role="combobox"')}<div id="res" hidden></div>`, { education: [{ school: 'U', degree: "Bachelor's", field: 'Mechanical Engineering' }] });
+    const d = w.document;
+    const res = d.getElementById('res');
+    const input = d.getElementById('maj');
+    const draw = (items, q) => {
+      res.innerHTML = '';
+      items.forEach((t) => {
+        const row = d.createElement('div');
+        const at = q ? t.toLowerCase().indexOf(q) : -1;
+        row.innerHTML = at < 0 ? t : `${t.slice(0, at)}<b>${t.slice(at, at + q.length)}</b>${t.slice(at + q.length)}`;
+        row.addEventListener('click', () => { input.value = row.textContent.trim(); res.hidden = true; });
+        res.append(row);
+      });
+      res.hidden = !items.length;
+    };
+    input.addEventListener('mousedown', () => draw(ALL.slice(0, 3), ''));
+    input.addEventListener('input', () => setTimeout(() => { const q = input.value.toLowerCase(); if (q) draw(ALL.filter((t) => t.toLowerCase().includes(q)), q); }, 300));
+    await w.__jobAutofill();
+    check('highlighted search results: exact major chosen', [val(d, 'maj'), (w.__jobAutofillTrace || []).length > 0], ['Mechanical Engineering', true]);
+  }
+
   // ---------- "Have you worked here?" / "Does a relative work here?" ----------
   {
     const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';

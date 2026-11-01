@@ -274,12 +274,13 @@
     ];
   }
 
-  function pickAny(texts, answers) {
+  function pickAny(texts, answers, noReverse = false) {
     const t = texts.map(norm);
     const list = answers.map(norm).filter(Boolean);
     if (list[0] === 'decline') return t.findIndex((x) => DECLINE.test(x));
     const finders = list.map(tierFinders);
     for (let tier = 0; tier < 6; tier++) {
+      if (noReverse && tier === 4) continue; // fragments of a highlighted result must not match
       for (const f of finders) {
         const i = t.findIndex(f[tier]);
         if (i >= 0) return i;
@@ -434,11 +435,36 @@
     const i = pickAny(opts.map((o) => txt(o)), answers);
     if (i >= 0) return opts[i];
     const items = changedItems(snap, anchor);
-    const j = pickAny(items.map((n) => itemText(n)), answers);
+    const j = pickAny(items.map((n) => itemText(n)), answers, true);
     return j >= 0 ? items[j] : null;
   }
 
+  // Last resort: type the answer, then ArrowDown + Enter like a person. Only counts if a suggestion list was
+  // showing, it closed, and the box shows the answer, so typed-but-unchosen text is cleared, not kept.
+  async function keyboardPick(el, answers, before) {
+    for (const typed of answers.slice(0, 2)) {
+      await typeInto(el, typed);
+      await sleep(900);
+      const wasOpen = changedItems(before, el).length > 0; // a suggestion list is showing
+      for (const k of ['ArrowDown', 'Enter']) {
+        const c = k === 'Enter' ? 13 : 40;
+        for (const type of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(type, { key: k, code: k, keyCode: c, which: c, bubbles: true, cancelable: true }));
+        await sleep(250);
+      }
+      await sleep(300);
+      const v = shownValue(el);
+      // Typed text stays in the box whether or not anything was chosen, so also require the list to have closed.
+      if (wasOpen && changedItems(before, el).length === 0 && v && !PLACEHOLDER.test(v) && pickAny([v], answers, true) >= 0) return true;
+    }
+    return false;
+  }
+
+  const sample = (nodes) => nodes.slice(0, 5).map((n) => itemText(n).slice(0, 40));
+
   async function fillCombobox(el, answers) {
+    const trace = { answer: answers[0], steps: [] };
+    (window.__jobAutofillTrace = window.__jobAutofillTrace || []).push(trace);
+    if (window.__jobAutofillTrace.length > 40) window.__jobAutofillTrace.shift();
     const before = snapshot();
     el.focus();
     clickLike(el);
@@ -452,12 +478,13 @@
       await sleep(300);
       opts = visibleOptions();
     }
+    trace.opened = { options: opts.length, changed: changedItems(before, el).length, sample: sample(changedItems(before, el)) };
     let target = findCandidate(opts, answers, before, el);
-    if (!target) target = await scrollForTarget(answers, before, el);
+    if (!target) { target = await scrollForTarget(answers, before, el); trace.scrolled = !!target; }
     // Long or paginated lists only load their first page: type to filter (results may load slowly).
     // Spellings first, then single keywords ("Engineering - Mechanical" is found by typing "mechanical").
     const keywords = [...new Set(words(answers[0]).filter((w) => w.length >= 4))].sort((a, b) => b.length - a.length).slice(0, 2);
-    const tries = [...answers.slice(0, 3).map((typed) => [typed, 2400]), ...keywords.map((w) => [w, 1500])];
+    const tries = [...answers.slice(0, 3).map((typed) => [typed, 3000]), ...keywords.map((w) => [w, 1500])];
     for (const [typed, wait] of tries) {
       if (target) break;
       await typeInto(el, typed);
@@ -465,12 +492,22 @@
         await sleep(300);
         target = findCandidate(visibleOptions(), answers, before, el);
       }
+      const seen = changedItems(before, el);
+      trace.steps.push({ typed, found: !!target, changed: seen.length, sample: sample(seen) });
     }
-    if (!target) { setNative(el, ''); el.blur(); return false; }
+    if (!target) {
+      const done = await keyboardPick(el, answers, before);
+      trace.keyboard = done;
+      if (done) return true;
+      trace.outcome = 'no match';
+      setNative(el, ''); el.blur();
+      return false;
+    }
     const picked = itemText(target) || txt(target);
     clickLike(target);
     await sleep(250);
-    if (!tookPick(el, picked)) { setNative(el, ''); el.blur(); return false; }
+    if (!tookPick(el, picked)) { trace.outcome = 'clicked but the box did not take it: ' + picked.slice(0, 40); setNative(el, ''); el.blur(); return false; }
+    trace.outcome = 'picked ' + picked.slice(0, 40);
     return true;
   }
 
@@ -519,29 +556,47 @@
 
   // What each leaf element said and whether it was visible, so popup items are noticed even when the page
   // re-uses the same DOM nodes (their text changes or they become visible when the list opens).
-  // Text an element says itself: all of it for a leaf, its own text nodes otherwise ("Mechanical Engineering <span>(MEN)</span>").
-  const itemText = (n) => (n.children.length
-    ? [...n.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(' ').trim()
-    : txt(n).trim());
+  // All the text an element shows, whitespace collapsed.
+  const itemText = (n) => (n.textContent || '').replace(/\s+/g, ' ').trim();
 
+  // What each element said and whether it was visible, so popup items are noticed even when the page
+  // re-uses the same DOM nodes (their text changes or they become visible when the list opens).
   function snapshot() {
     const m = new Map();
     for (const n of document.body.querySelectorAll('*')) {
       const t = itemText(n);
-      if (t) m.set(n, { t, v: shown(n) });
+      if (t && t.length <= 100) m.set(n, { t, v: shown(n) });
     }
     return m;
   }
 
   const NOT_ITEMS = 'label, legend, option, select, textarea, h1, h2, h3, h4, h5, h6, th, [role=search], nav, header';
+  const depthOf = (n) => { let d = 0; for (let p = n.parentElement; p; p = p.parentElement) d++; return d; };
+
+  // The item an element belongs to: a highlighted fragment ("<b>Mechanical Engineering</b> Technology") is part
+  // of its row, so climb while the parent says more and this element is its only text-bearing child.
+  function rowOf(n) {
+    for (;;) {
+      const p = n.parentElement;
+      if (!p || p === document.body) return n;
+      const pt = itemText(p);
+      if (pt === itemText(n) || pt.length > 100) return n;
+      if ([...p.children].filter((c) => itemText(c)).length !== 1) return n;
+      n = p;
+    }
+  }
+
+  // Small elements that appeared, changed or became visible since the snapshot, as whole list items,
+  // deepest first (so the item itself comes before the list that contains it).
   function changedItems(snap, anchor) {
-    return [...document.body.querySelectorAll('*')].filter((n) => {
-      if (n === anchor || n.children.length > 3 || !shown(n) || n.closest(NOT_ITEMS)) return false;
+    const found = [...document.body.querySelectorAll('*')].filter((n) => {
+      if (n === anchor || n.contains(anchor) || n.children.length > 6 || !shown(n) || n.closest(NOT_ITEMS)) return false;
       const t = itemText(n);
-      if (!t || t.length > 100) return false;
+      if (!t || t.length > 100 || n.querySelector('input, textarea, select')) return false;
       const b = snap.get(n);
       return !b || b.t !== t || !b.v;
     });
+    return [...new Set(found.map(rowOf))].map((n) => [n, depthOf(n)]).sort((a, b) => b[1] - a[1]).map(([n]) => n);
   }
 
   // Items that appeared (or changed) after the snapshot and whose text is the skill. Best match first.
@@ -711,9 +766,10 @@
   const shown = (n) => n.offsetParent !== null || n.getClientRects().length > 0;
 
   function key(el, type, ch) {
-    const code = ch.charCodeAt(0);
+    const letter = /[a-z]/i.test(ch);
+    const code = letter ? ch.toUpperCase().charCodeAt(0) : ch.charCodeAt(0);
     return el.dispatchEvent(new KeyboardEvent(type, {
-      key: ch, code: /\d/.test(ch) ? 'Digit' + ch : ch, keyCode: code, which: code,
+      key: ch, code: letter ? 'Key' + ch.toUpperCase() : /\d/.test(ch) ? 'Digit' + ch : ch, keyCode: code, which: code,
       bubbles: true, cancelable: true, composed: true,
     }));
   }
@@ -1202,6 +1258,6 @@
         heading: sectionHeading(el).slice(0, 60) || undefined,
       });
     }
-    return { page: location.origin + location.pathname, topFrame: window === window.top, lastRun: window.__jobAutofillLast, fields: fields.slice(0, 250) };
+    return { page: location.origin + location.pathname, topFrame: window === window.top, lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
   };
 })();
