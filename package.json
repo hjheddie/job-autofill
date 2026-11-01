@@ -1,0 +1,12 @@
+{
+  "name": "job-autofill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser extension that autofills job applications from locally stored profiles",
+  "scripts": {
+    "test": "node test/regression.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

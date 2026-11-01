@@ -52,3 +52,6 @@ Saved in the profile as repeatable blocks. On pages with "Work Experience N" / "
 
 ## Work experience rows (SuccessFactors-style profile pages)
 Pages that list repeated rows starting with "From Date" (Company Name, Type of Business, Company Country, Position Title, Employment Type…) are filled row by row from your saved jobs: the Nth row gets the Nth job. Add employment type, industry and company country to each job in your profile. Plain "Country / State / City" boxes in an Education block are left alone when the page also has "Present …" address fields.
+
+## Tests
+`npm install` then `npm test` runs `test/regression.js`: small jsdom pages (Greenhouse-, Workday- and SuccessFactors-style forms, paginated dropdowns, skills, languages, job rows) checked against a sample profile.
