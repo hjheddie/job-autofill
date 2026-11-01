@@ -182,6 +182,7 @@
     return AUTOCOMPLETE[ac] || null;
   }
 
+  const EDU_KEYS = new Set(['school', 'degree', 'major', 'gpa', 'graduationDate', 'expectedGraduation', 'eduStart', 'degreeCompleted']);
   const DEGREE_ORDER = ['High School', "Associate's", "Bachelor's", "Master's", 'Doctorate (PhD)'];
   // The highest degree whose graduation date has passed (null while you are still studying for all of them).
   function highestDone(p) {
@@ -946,6 +947,7 @@
     const filled = [];
     const unmatched = [];
     const covered = [];
+    await ensureRows(p, filled);
     const all = collect(document, []);
     scanHomeFields(all);
     scanJobRows(all);
@@ -1033,13 +1035,16 @@
           const opts = isSelect ? norm([...el.options].map((o) => o.text).join(' ')) : await peekOptions(el);
           key = (RULES.find(([k, re]) => OPTION_RULES.includes(k) && re.test(opts)) || [])[0] || null;
         }
+        const isEdu = EDU_KEYS.has(key);
+        const eduEntry = isEdu ? (p.education || [])[Math.max(rowIndex(el, 'edu'), 1) - 1] : null;
+        const pe = isEdu ? { ...p, education: eduEntry ? [eduEntry] : [] } : p; // this row's entry
         let answer = customAnswer(label, p);
-        if (answer == null && key) answer = valueFor(key, p);
+        if (answer == null && key) answer = valueFor(key, pe);
       // Language Skills rows: the Nth "Language" box gets the Nth language, its ratings get that row's level.
       if (key === 'languageName') { langRow++; answer = (p.languages || [])[langRow - 1]?.language || ''; }
       else if (key === 'langProficiency') { if (skipLangRatings) continue; answer = (p.languages || [])[Math.max(langRow - 1, 0)]?.proficiency || ''; }
-      else if (key === 'graduationDate' || key === 'expectedGraduation') answer = gradDate(p, key === 'expectedGraduation', el.placeholder, /anticipated|expected/.test(label));
-      if (key === 'eduStart') answer = eduStartDate(p, label);
+      else if (key === 'graduationDate' || key === 'expectedGraduation') answer = gradDate(pe, key === 'expectedGraduation', el.placeholder, /anticipated|expected/.test(label));
+      if (key === 'eduStart') answer = eduStartDate(pe, label);
       let employerNote = '';
       if (!answer && (key === 'previousEmployee' || key === 'relatedEmployee')) { // "No" unless the application is for one of your companies
         const auto = employerAnswer(key, p, label);
@@ -1048,7 +1053,7 @@
       }
       if (key === 'languages' && (isSelect || isListbox || isCombo)) answer = (p.languages || [])[0]?.language || '';
         if (!answer) {
-          const quiet = ['phoneExt', 'secondLastName', 'middleName', 'secondaryPhone', 'address2', 'graduationDate', 'expectedGraduation', 'eduStart'].includes(key) || /^if (yes|so|you)\b/.test(label);
+          const quiet = ['phoneExt', 'secondLastName', 'middleName', 'secondaryPhone', 'address2', 'graduationDate', 'expectedGraduation', 'eduStart'].includes(key) || (isEdu && !eduEntry) || /^if (yes|so|you)\b/.test(label);
           if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${employerNote || (key ? `no "${key}" saved in your profile` : 'field not recognized')}`);
           continue;
         }
@@ -1124,15 +1129,83 @@
     }
   }
 
-  let fromAnchors = [];
-  // Which job row a field belongs to = how many "From Date" boxes sit at or before it, in page order.
+  const rowAnchors = { work: [], edu: [] };
+  const inOrder = (a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+  // Which row a field belongs to = how many row-starting boxes sit at or before it, in page order:
+  // "From Date" starts a job, "School" starts an education entry.
   function scanJobRows(els) {
-    fromAnchors = els.filter((el) => /^from date\b/.test(labelText(el))).map(hostOf)
-      .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    const anchors = (re) => els.filter((el) => re.test(labelText(el))).map(hostOf).sort(inOrder);
+    rowAnchors.work = anchors(/^from date\b/);
+    rowAnchors.edu = anchors(/^school\b/);
   }
-  function rowIndex(el) {
+  function rowIndex(el, which = 'work') {
     const a = hostOf(el);
-    return fromAnchors.filter((f) => f === a || (f.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING)).length;
+    return rowAnchors[which].filter((f) => f === a || (f.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING)).length;
+  }
+
+  // ---- Sections the page makes you add one row at a time (SuccessFactors "+ Add"), sized from your profile ----
+  const SF_SECTIONS = [
+    { name: 'work experience', kind: 'work', list: 'workExperience', heading: /^(external )?work experience$|^employment history$/, marker: /^company name\b/, cap: 10 },
+    { name: 'education', kind: 'edu', list: 'education', heading: /^education$/, marker: /^school\b/, cap: 5 },
+    { name: 'languages', kind: 'lang', list: 'languages', heading: /^languages?( skills)?$/, marker: /^language$/, cap: 10 },
+  ];
+  // Other section titles on those pages, so one section's range ends where the next begins.
+  const OTHER_HEADING = /^(certifications\/licenses|geographic mobility|professional memberships|my documents|profile information|additional documents|job specific information|external work experience|work experience|education|language skills|languages)$/;
+  const ADD_BUTTON = /^(\+\s*)?add( another)?$/;
+
+  const isAfter = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); // b comes after a
+
+  // Where a section is: its heading, its "Add" button(s) and how many rows it already has.
+  function sectionInfo(def, all) {
+    const heads = [...document.body.querySelectorAll('*')].filter((n) => {
+      if (n.children.length > 2 || !shown(n) || n.closest('nav, header, [role=search], [role=navigation]')) return false;
+      return OTHER_HEADING.test(norm(itemText(n)));
+    });
+    const mine = heads.filter((n) => def.heading.test(norm(itemText(n))));
+    let best = null;
+    for (const h of mine) {
+      const next = heads.filter((n) => isAfter(h, n) && !h.contains(n) && !def.heading.test(norm(itemText(n))))
+        .sort(inOrder)[0] || null;
+      const within = (n) => isAfter(h, n) && (!next || isAfter(n, next));
+      const add = [...document.querySelectorAll('a, button, [role=button]')].find((b) => within(b) && shown(b) && !b.disabled
+        && ADD_BUTTON.test(norm(itemText(b) || b.getAttribute('aria-label') || '')));
+      const rows = all.filter((el) => within(hostOf(el)) && def.marker.test(labelText(el))).length;
+      const info = { heading: h, add: add || null, rows };
+      if (add && (!best || !best.add)) best = info;
+      else if (!best) best = info;
+    }
+    return best;
+  }
+
+  // Click "Add" until each section has as many rows as you have saved entries (never more than the cap).
+  async function ensureRows(p, filled) {
+    for (const def of SF_SECTIONS) {
+      const want = Math.min((p[def.list] || []).length, def.cap);
+      if (!want) continue;
+      if (sectionRoots(KINDS[def.kind]).length) continue; // Workday-style numbered blocks are added by fillSections
+      for (let guard = 0; guard < want; guard++) {
+        const info = sectionInfo(def, collect(document, []));
+        if (!info || !info.add || info.rows >= want) break;
+        clickLike(info.add);
+        let grew = false;
+        for (let t = 0; t < 3000 && !grew; t += 300) {
+          await sleep(300);
+          const now = sectionInfo(def, collect(document, []));
+          grew = !!now && now.rows > info.rows;
+        }
+        if (!grew) break;
+        filled.push({ label: `Added a ${def.name} row`, key: 'addRow' });
+      }
+    }
+  }
+
+  // What the field report shows: the sections found, their rows and Add buttons.
+  function describeSections() {
+    const all = collect(document, []);
+    return SF_SECTIONS.map((def) => {
+      const info = sectionInfo(def, all);
+      return { section: def.name, found: !!info, rows: info ? info.rows : 0, hasAddButton: !!(info && info.add), wanted: (window.__jobAutofillWanted || {})[def.list] };
+    });
   }
 
   // Types a formatted value (07/01/2026) character by character, then commits it with Enter and blur.
@@ -1236,6 +1309,7 @@
   // ---- Troubleshooting report: what the extension sees, without your typed text ----
   window.__jobAutofillReport = async function () {
     const p = (await window.JA_PROFILES.active()) || {};
+    window.__jobAutofillWanted = { workExperience: (p.workExperience || []).length, education: (p.education || []).length, languages: (p.languages || []).length };
     scanHomeFields(collect(document, []));
     const fields = [];
     for (const el of collect(document, [])) {
@@ -1258,6 +1332,6 @@
         heading: sectionHeading(el).slice(0, 60) || undefined,
       });
     }
-    return { page: location.origin + location.pathname, topFrame: window === window.top, lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
+    return { page: location.origin + location.pathname, topFrame: window === window.top, sections: describeSections(), lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
   };
 })();

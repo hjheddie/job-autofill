@@ -323,6 +323,37 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('relative list says none -> No', out[1], 'No');
   }
 
+  // ---------- Sections that need "+ Add": count the rows, click Add until the profile fits ----------
+  {
+    const row = {
+      work: (n) => `<div><label for="fd${n}">From Date</label><input id="fd${n}" placeholder="MM/DD/YYYY"><label for="co${n}">* Company Name</label><input id="co${n}"><label for="pt${n}">* Position Title</label><input id="pt${n}"></div>`,
+      edu: (n) => `<div><label for="sc${n}">* School/Institution Name</label><input id="sc${n}"><label for="mj${n}">Major</label><input id="mj${n}"><label for="sd${n}">Start Date</label><input id="sd${n}" placeholder="MM/DD/YYYY"></div>`,
+      lang: (n) => `<div><label for="lg${n}">* Language</label><select id="lg${n}"><option>No Selection</option><option>English</option><option>Spanish</option></select><label for="sp${n}">* Speaking Proficiency</label><select id="sp${n}"><option>No Selection</option><option>Beginner</option><option>Advanced</option><option>Fluent</option></select></div>`,
+    };
+    const html = `<h3>External Work Experience</h3><a id="add-work" href="#">+ Add</a><div id="rows-work">${row.work(1)}</div>
+      <h3>Education</h3><a id="add-edu" href="#">+ Add</a><div id="rows-edu"></div>
+      <h3>Certifications/Licenses</h3><a id="add-cert" href="#">+ Add</a>
+      <h3>Language Skills</h3><a id="add-lang" href="#">+ Add</a><div id="rows-lang"></div>`;
+    const w = loadPage(html, {
+      workExperience: [{ title: 'Intern', company: 'Acme', fromMonth: '06', fromYear: '2025' }, { title: 'Lead', company: 'Beta', fromMonth: '01', fromYear: '2026' }, { title: 'Dev', company: 'Gamma', fromMonth: '09', fromYear: '2024' }],
+      education: [{ school: 'UIUC', field: 'Mechanical Engineering', fromMonth: '08', fromDay: '22', fromYear: '2023' }, { school: 'Parkland College', field: 'Engineering', fromMonth: '08', fromYear: '2021' }],
+      languages: [{ language: 'English', proficiency: 'Native' }, { language: 'Spanish', proficiency: 'Beginner' }] });
+    const d = w.document;
+    const counts = { work: 1, edu: 0, lang: 0 };
+    let certClicks = 0;
+    for (const k of ['work', 'edu', 'lang']) {
+      d.getElementById('add-' + k).addEventListener('click', (e) => { e.preventDefault(); counts[k]++; d.getElementById('rows-' + k).insertAdjacentHTML('beforeend', row[k](counts[k])); });
+    }
+    d.getElementById('add-cert').addEventListener('click', () => { certClicks++; });
+    await w.__jobAutofill();
+    check('sections: rows added to match the profile (work, education, languages), certifications untouched', [counts.work, counts.edu, counts.lang, certClicks], [3, 2, 2, 0]);
+    check('sections: jobs, one per row', [1, 2, 3].map((n) => `${val(d, 'co' + n)}/${val(d, 'pt' + n)}/${val(d, 'fd' + n)}`), ['Acme/Intern/06/01/2025', 'Beta/Lead/01/01/2026', 'Gamma/Dev/09/01/2024']);
+    check('sections: education, one per row', [1, 2].map((n) => `${val(d, 'sc' + n)}/${val(d, 'mj' + n)}/${val(d, 'sd' + n)}`), ['UIUC/Mechanical Engineering/08/22/2023', 'Parkland College/Engineering/08/01/2021']);
+    check('sections: languages, one per row', [1, 2].map((n) => `${val(d, 'lg' + n)}/${val(d, 'sp' + n)}`), ['English/Fluent', 'Spanish/Beginner']);
+    const report = await w.__jobAutofillReport();
+    check('sections: field report lists them', report.sections.map((x) => [x.section, x.rows, x.hasAddButton]), [['work experience', 3, true], ['education', 2, true], ['languages', 2, true]]);
+  }
+
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
   process.exit(failures ? 1 : 0);
 })();

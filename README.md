@@ -61,3 +61,6 @@ Pages that list repeated rows starting with "From Date" (Company Name, Type of B
 
 ## When a dropdown still won't pick
 **Copy field report** now includes a `trace` section: for each searchable dropdown the extension tried, what the list showed when opened, what appeared after each thing it typed, and how the attempt ended. That is usually enough to see why an option wasn't recognized.
+
+## Sections that need "+ Add" (SuccessFactors profile pages)
+Before filling, the extension finds the **External Work Experience**, **Education** and **Language Skills** sections, counts the rows each already has, and clicks that section's **+ Add** until the row count matches the entries saved in your profile (up to 10 jobs, 5 schools, 10 languages). Other sections (certifications, memberships) are never touched, and nothing is added if you have no saved entries for a section. Education rows are then filled one entry per row, like jobs. Workday's numbered blocks ("Work Experience 1") are added by their own logic. **Copy field report** has a `sections` list showing, per section, whether it was found, how many rows it has, whether an Add button was found and how many entries you have.
