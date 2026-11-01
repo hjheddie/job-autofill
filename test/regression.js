@@ -177,7 +177,7 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     const html = `<div role="search" style="display:none"><input id="kw" placeholder="Search by keyword"></div><h3>Profile Information</h3>
       ${plain('fn', '* Legal First Name:')}${plain('a1', '* Present Address (Number, Street and Apt. Number)')}${plain('a2', 'Address Line 2')}
       ${combo('pco', '* Present Country of Residence', 'country')}${combo('pst', '* Present State/Province', 'state')}${plain('pci', '* Present City')}${plain('ph2', 'Secondary Phone:')}
-      <h3>External Work Experience</h3>${job(1)}${job(2)}${job(3)}
+      <button aria-expanded="true">Please provide your external work experience history, most recent first</button>${job(1)}${job(2)}${job(3)}
       <h3>Education</h3>${combo('eco', 'Country', 'country')}${plain('eci', 'City')}${plain('sch', '* School/Institution Name')}${combo('maj', 'Major', 'major')}${plain('omj', 'If other, enter major')}`;
     const w = loadPage(html, {
       firstName: 'Ada', address: '1 Main St', city: 'Urbana', state: 'Illinois', country: 'United States',
@@ -331,7 +331,7 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
       lang: (n) => `<div><label for="lg${n}">* Language</label><select id="lg${n}"><option>No Selection</option><option>English</option><option>Spanish</option></select><label for="sp${n}">* Speaking Proficiency</label><select id="sp${n}"><option>No Selection</option><option>Beginner</option><option>Advanced</option><option>Fluent</option></select></div>`,
     };
     const html = `<h3>External Work Experience</h3><a id="add-work" href="#">+ Add</a><div id="rows-work">${row.work(1)}</div>
-      <h3>Education</h3><a id="add-edu" href="#">+ Add</a><div id="rows-edu"></div>
+      <button aria-expanded="true">Please provide your formal education</button><a id="add-edu" href="#"><span class="i"></span> Add</a><div id="rows-edu"></div>
       <h3>Certifications/Licenses</h3><a id="add-cert" href="#">+ Add</a>
       <h3>Language Skills</h3><a id="add-lang" href="#">+ Add</a><div id="rows-lang"></div>`;
     const w = loadPage(html, {

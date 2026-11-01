@@ -24,6 +24,7 @@
     ['referral', /referred by|employee referral/],
     ['relatedEmployee', /related to anyone|relatives? (that|who|working)|family member/],
     ['sponsorship', /sponsor/],
+    ['workAuthPermanent', /authori[sz]ed to work.*permanent|permanent(ly)? (basis|authori|work)/],
     ['workAuth', /authori[sz]ed to work|legally (authori[sz]ed|eligible)|work authori[sz]ation|eligible to work|right to work/],
     ['veteran', /veteran|vevraa/],
     ['disability', /disabilit|cc-?305/],
@@ -238,6 +239,8 @@
         return p.furnish || (['gender', 'race', 'hispanic', 'veteran', 'disability']
           .every((k) => !p[k] || /^decline$/i.test(p[k])) ? 'No' : 'Yes');
       case 'phoneCountryCode': return p.phoneCountryCode || p.country || 'United States';
+      // "Authorized to work ... on a permanent basis": needing sponsorship means you are not.
+      case 'workAuthPermanent': return /^y/i.test(p.sponsorship || '') ? 'No' : (p.workAuth || '');
       case 'phoneType': return p.phoneType || 'Mobile';
       case 'hispanic': return p.hispanic || (p.race === 'Hispanic or Latino' ? 'Yes' : p.race && p.race !== 'Decline' ? 'No' : 'Decline');
       case 'gender': case 'race': case 'veteran': case 'disability': return p[key] || 'Decline';
@@ -287,7 +290,28 @@
         if (i >= 0) return i;
       }
     }
-    return -1;
+    return noReverse ? -1 : closestOption(t, list);
+  }
+
+  // Last resort for different wording: the option sharing the most words with an answer ("Bachelor's
+  // degree" ~ "Bachelors Degree", "U.S. citizen" ~ "US Citizen"). Needs to agree on negation.
+  const FUZZY_STOP = new Set(['the', 'a', 'an', 'of', 'and', 'in', 'to', 'or', 'your', 'you', 'i', 'am', 'are', 'is', 'have', 'been']);
+  const stems = (x) => new Set(x.replace(/[''.]/g, '').split(/[^a-z0-9]+/).filter((w) => w && !FUZZY_STOP.has(w)).map((w) => (w.length > 3 ? w.replace(/(es|s)$/, '') : w)));
+  function closestOption(t, list) {
+    let best = -1, top = 0;
+    for (const a of list) {
+      const as = stems(a);
+      if (!as.size) continue;
+      const na = /\b(not|non|no)\b/.test(a);
+      t.forEach((x, i) => {
+        if (!x || PLACEHOLDER.test(x) || /\b(not|non|no)\b/.test(x) !== na) return;
+        const xs = stems(x);
+        const common = [...as].filter((w) => xs.has(w)).length;
+        const score = (2 * common) / (as.size + xs.size);
+        if (common && score >= 0.6 && score > top) { top = score; best = i; }
+      });
+    }
+    return best;
   }
 
   const pickOption = (texts, answer) => pickAny(texts, [answer]);
@@ -1146,34 +1170,44 @@
 
   // ---- Sections the page makes you add one row at a time (SuccessFactors "+ Add"), sized from your profile ----
   const SF_SECTIONS = [
-    { name: 'work experience', kind: 'work', list: 'workExperience', heading: /^(external )?work experience$|^employment history$/, marker: /^company name\b/, cap: 10 },
-    { name: 'education', kind: 'edu', list: 'education', heading: /^education$/, marker: /^school\b/, cap: 5 },
-    { name: 'languages', kind: 'lang', list: 'languages', heading: /^languages?( skills)?$/, marker: /^language$/, cap: 10 },
+    { name: 'work experience', kind: 'work', list: 'workExperience', marker: /^(company|employer)( name)?\b/, cap: 10 },
+    { name: 'education', kind: 'edu', list: 'education', marker: /^school\b/, cap: 5 },
+    { name: 'languages', kind: 'lang', list: 'languages', marker: /^language$/, cap: 10 },
   ];
-  // Other section titles on those pages, so one section's range ends where the next begins.
-  const OTHER_HEADING = /^(certifications\/licenses|geographic mobility|professional memberships|my documents|profile information|additional documents|job specific information|external work experience|work experience|education|language skills|languages)$/;
-  const ADD_BUTTON = /^(\+\s*)?add( another)?$/;
+  // "Add", "+ Add", "Add another", "Add Work Experience" ... but not attachments, documents or other sections.
+  const ADD_BUTTON = /^(\+\s*)?add\b(?!.*(document|attach|file|resume|photo|cover|link|certif|licen|reference|membership))[^.]{0,30}$/;
 
   const isAfter = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); // b comes after a
 
-  // Where a section is: its heading, its "Add" button(s) and how many rows it already has.
-  function sectionInfo(def, all) {
-    const heads = [...document.body.querySelectorAll('*')].filter((n) => {
-      if (n.children.length > 2 || !shown(n) || n.closest('nav, header, [role=search], [role=navigation]')) return false;
-      return OTHER_HEADING.test(norm(itemText(n)));
+  // Section titles on the page: headings and accordion headers, however they are worded.
+  const TITLE_SEL = 'h1, h2, h3, h4, h5, h6, [role=heading], legend, [aria-expanded]';
+  const KIND_WORD = { work: /work|employ|experience/, edu: /educat|school/, lang: /language/ };
+  function sectionTitles() {
+    return [...document.querySelectorAll(TITLE_SEL)].filter((n) => {
+      if (!shown(n) || n.closest('nav, [role=menu], [role=listbox]') || /^(input|select|textarea)$/i.test(n.tagName)) return false;
+      if (n.getAttribute('aria-haspopup') || /^(combobox|tab|menuitem|option)$/.test(n.getAttribute('role') || '')) return false;
+      const t = itemText(n);
+      return !!t && t.length <= 120;
     });
-    const mine = heads.filter((n) => def.heading.test(norm(itemText(n))));
+  }
+
+  // Where a section is: its title (any title containing "work", "education" or "language"), the first
+  // "Add" button under it and how many rows it already has.
+  function sectionInfo(def, all) {
+    const titles = sectionTitles();
+    let mine = titles.filter((n) => KIND_WORD[def.kind].test(norm(itemText(n))));
+    if (!mine.length && def.kind === 'work') mine = titles.filter((n) => /^profile information$/.test(norm(itemText(n))));
+    const buttons = [...document.querySelectorAll('a, button, [role=button]')].filter((b) => shown(b) && !b.disabled
+      && ADD_BUTTON.test(norm(itemText(b) || b.getAttribute('aria-label') || b.title || '')));
     let best = null;
     for (const h of mine) {
-      const next = heads.filter((n) => isAfter(h, n) && !h.contains(n) && !def.heading.test(norm(itemText(n))))
-        .sort(inOrder)[0] || null;
+      const next = titles.filter((n) => isAfter(h, n) && !h.contains(n) && !n.contains(h))
+        .filter((n) => norm(itemText(n)) !== norm(itemText(h))).sort(inOrder)[0] || null;
       const within = (n) => isAfter(h, n) && (!next || isAfter(n, next));
-      const add = [...document.querySelectorAll('a, button, [role=button]')].find((b) => within(b) && shown(b) && !b.disabled
-        && ADD_BUTTON.test(norm(itemText(b) || b.getAttribute('aria-label') || '')));
-      const rows = all.filter((el) => within(hostOf(el)) && def.marker.test(labelText(el))).length;
-      const info = { heading: h, add: add || null, rows };
-      if (add && (!best || !best.add)) best = info;
-      else if (!best) best = info;
+      const add = buttons.find((b) => within(b) && !h.contains(b));
+      const inRange = all.filter((el) => within(hostOf(el)));
+      const info = { heading: h, add: add || null, rows: inRange.filter((el) => def.marker.test(labelText(el))).length, fields: inRange.length };
+      if (!best || (add && !best.add)) best = info;
     }
     return best;
   }
@@ -1191,7 +1225,7 @@
         return !!box && !!box.querySelector('input, select, textarea, [role=combobox], a, button');
       });
       if (!closed.length) return;
-      for (const n of closed) { clickLike(n.tagName === 'SUMMARY' ? n : n); await sleep(150); }
+      for (const n of closed) { clickLike(n); await sleep(150); }
       await sleep(500);
     }
   }
@@ -1210,7 +1244,7 @@
         for (let t = 0; t < 3000 && !grew; t += 300) {
           await sleep(300);
           const now = sectionInfo(def, collect(document, []));
-          grew = !!now && now.rows > info.rows;
+          grew = !!now && (now.rows > info.rows || now.fields > info.fields);
         }
         if (!grew) break;
         filled.push({ label: `Added a ${def.name} row`, key: 'addRow' });
@@ -1357,6 +1391,7 @@
     const outline = {
       headings: visible('h1, h2, h3, h4, [role=heading], legend, [class*=title i], [class*=heading i]', 40),
       buttons: visible('a, button, [role=button]', 50),
+      addButtons: [...document.querySelectorAll('a, button, [role=button]')].filter(shown).map((n) => (itemText(n) || n.getAttribute('aria-label') || n.title || '').slice(0, 40)).filter((t) => /add|\+|new/i.test(t)).slice(0, 20),
       collapsed: [...document.querySelectorAll('[aria-expanded="false"]')].filter(shown).map((n) => itemText(n).slice(0, 40)).slice(0, 30),
       hiddenFields: fields.filter((f) => !f.shown).length,
       frames: document.querySelectorAll('iframe').length,
