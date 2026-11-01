@@ -1332,6 +1332,15 @@
         heading: sectionHeading(el).slice(0, 60) || undefined,
       });
     }
-    return { page: location.origin + location.pathname, topFrame: window === window.top, sections: describeSections(), lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
+    // What the page shows right now, to tell "wrong step / not loaded yet" from "not recognized".
+    const visible = (sel, max) => [...document.querySelectorAll(sel)].filter(shown).map((n) => itemText(n)).filter((t) => t && t.length <= 40)
+      .filter((t, i, a) => a.indexOf(t) === i).slice(0, max);
+    const outline = {
+      headings: visible('h1, h2, h3, h4, [role=heading], legend, [class*=title i], [class*=heading i]', 40),
+      buttons: visible('a, button, [role=button]', 50),
+      hiddenFields: fields.filter((f) => !f.shown).length,
+      frames: document.querySelectorAll('iframe').length,
+    };
+    return { page: location.origin + location.pathname, topFrame: window === window.top, outline, sections: describeSections(), lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
   };
 })();
