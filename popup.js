@@ -104,3 +104,23 @@ document.getElementById('report').onclick = async () => {
     out.textContent = 'Could not build the report: ' + String(e.message || e);
   }
 };
+
+document.getElementById('structure').onclick = async () => {
+  out.className = '';
+  try {
+    const frames = await inPage(() => window.__jobAutofillStructure());
+    const text = frames.map((f) => `### ${f.page}${f.topFrame ? '' : ' (frame)'}
+${f.markup}`).join('
+
+');
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    document.body.append(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    out.textContent = `Copied the page structure (${Math.round(text.length / 1024)} KB). Typed text is removed and emails and long numbers are masked. Open the sections you need first, and copy again after clicking Add.`;
+  } catch (e) {
+    out.className = 'warn';
+    out.textContent = 'Could not read the page: ' + String(e.message || e);
+  }
+};

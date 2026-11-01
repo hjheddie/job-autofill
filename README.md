@@ -60,6 +60,8 @@ Pages that list repeated rows starting with "From Date" (Company Name, Type of B
 "Have you worked here?" and "Does a relative work here?" are answered **No** unless the application is for one of your companies. Your jobs are used automatically for the first question; add other past employers, and companies where relatives work, under **Edit profile → Employers** (type `none` if no relative works anywhere you apply). The application's company is read from the question text, page title, headings and address. If it matches one of your companies the question is left for you, with the reason shown in the popup.
 
 ## When a dropdown still won't pick
+**Copy page structure** copies the page's markup (tags, ids, classes, roles, labels, option lists) with typed text removed and emails and long numbers masked. Open the sections first, copy once, click Add and copy again. That is what's needed to teach the extension a new site and to turn it into a regression test. When a dropdown option isn't matched, the field report's `trace` now also lists the options the list really offered.
+
 **Copy field report** now includes a `trace` section: for each searchable dropdown the extension tried, what the list showed when opened, what appeared after each thing it typed, and how the attempt ended. That is usually enough to see why an option wasn't recognized.
 
 ## Sections that need "+ Add" (SuccessFactors profile pages)

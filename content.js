@@ -525,13 +525,14 @@
       trace.keyboard = done;
       if (done) return true;
       trace.outcome = 'no match';
+      trace.options = [...new Set(visibleOptions().map((n) => itemText(n)))].slice(0, 40); // what the list really offers
       setNative(el, ''); el.blur();
       return false;
     }
     const picked = itemText(target) || txt(target);
     clickLike(target);
     await sleep(250);
-    if (!tookPick(el, picked)) { trace.outcome = 'clicked but the box did not take it: ' + picked.slice(0, 40); setNative(el, ''); el.blur(); return false; }
+    if (!tookPick(el, picked)) { trace.outcome = 'clicked but the box did not take it: ' + picked.slice(0, 40); trace.options = [...new Set(opts.map((n) => itemText(n)))].slice(0, 40); setNative(el, ''); el.blur(); return false; }
     trace.outcome = 'picked ' + picked.slice(0, 40);
     return true;
   }
@@ -1360,6 +1361,43 @@
   };
 
   // ---- Troubleshooting report: what the extension sees, without your typed text ----
+  // A copy of the page's markup with the personal parts removed, so the way a site is built can be
+  // shared and turned into a test. Keeps tags, ids, classes, roles, aria-*, labels and option lists;
+  // never keeps what was typed into a field, and masks emails and long digit runs in text.
+  window.__jobAutofillStructure = function () {
+    const KEEP = ['id', 'class', 'role', 'type', 'name', 'for', 'placeholder', 'title', 'data-automation-id', 'data-testid'];
+    const mask = (t) => t.replace(/[^\s@]+@[^\s@]+/g, '<email>').replace(/\d{4,}/g, '<n>').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const lines = [];
+    const budget = { chars: 0 };
+    const walk = (node, depth) => {
+      if (budget.chars > 400000 || depth > 40) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = mask(node.textContent || '');
+        if (t) lines.push('  '.repeat(depth) + '"' + t + '"');
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (/^(script|style|noscript|svg|link|meta|template)$/.test(tag)) return;
+      const attrs = [];
+      for (const a of node.attributes) {
+        if (KEEP.includes(a.name) || a.name.startsWith('aria-')) {
+          const v = a.name === 'class' ? a.value.split(/\s+/).slice(0, 6).join(' ') : mask(a.value);
+          if (v) attrs.push(a.name + '="' + v + '"');
+        }
+      }
+      if (!shown(node)) attrs.push('HIDDEN');
+      if (node.disabled) attrs.push('disabled');
+      const line = '  '.repeat(depth) + '<' + tag + (attrs.length ? ' ' + attrs.join(' ') : '') + '>';
+      lines.push(line); budget.chars += line.length;
+      if (/^(input|textarea)$/.test(tag)) return; // never what was typed
+      for (const c of node.childNodes) walk(c, depth + 1);
+      if (node.shadowRoot) { lines.push('  '.repeat(depth + 1) + '#shadow'); for (const c of node.shadowRoot.childNodes) walk(c, depth + 2); }
+    };
+    walk(document.body, 0);
+    return { page: location.origin + location.pathname, topFrame: window === window.top, markup: lines.join('\n') };
+  };
+
   window.__jobAutofillReport = async function () {
     const p = (await window.JA_PROFILES.active()) || {};
     window.__jobAutofillWanted = { workExperience: (p.workExperience || []).length, education: (p.education || []).length, languages: (p.languages || []).length };
