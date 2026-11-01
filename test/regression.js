@@ -235,6 +235,70 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('discipline left for you when no degree is finished', r.unmatched.some((u) => /discipline/.test(u)), true);
   }
 
+  // ---------- Ethnicity (Hispanic yes/no) first, race enables afterwards ----------
+  {
+    const w = loadPage(`${combo('eth', 'Ethnicity', 'eth')}${combo('race', 'Please indicate your race', 'race')}`, { race: 'Asian' });
+    const d = w.document;
+    d.getElementById('race').disabled = true;
+    paginated(w, { eth: ['Hispanic or Latino', 'Not Hispanic or Latino'], race: ['Asian', 'White', 'Black or African American'] },
+      { onClick: (t) => { d.getElementById('race').disabled = false; return t; } });
+    await w.__jobAutofill();
+    check('ethnicity: "Not Hispanic or Latino" then race', [val(d, 'eth'), val(d, 'race')], ['Not Hispanic or Latino', 'Asian']);
+  }
+
+  // ---------- Education start date with a day ----------
+  {
+    const w = loadPage(`<h3>Education</h3>${plain('sd', 'Start Date', 'placeholder="MM/DD/YYYY"')}${plain('av', 'What date are you available to start work', 'placeholder="MM/DD/YYYY"')}`,
+      { education: [{ school: 'U', fromMonth: '08', fromDay: '22', fromYear: '2023', toMonth: '05', toYear: '2028' }] });
+    await w.__jobAutofill();
+    check('education start date uses the saved day', [val(w.document, 'sd'), val(w.document, 'av')], ['08/22/2023', '']);
+  }
+
+  // ---------- A language the site doesn't offer: row and its rating stay empty ----------
+  {
+    const w = loadPage(`${combo('l1', '* Language', 'lang')}${combo('s1', '* Speaking Proficiency', 'prof')}${combo('l2', '* Language', 'lang')}${combo('s2', '* Speaking Proficiency', 'prof')}`,
+      { languages: [{ language: 'English', proficiency: 'Native' }, { language: 'Korean', proficiency: 'Advanced' }] });
+    paginated(w, { lang: ['Arabic', 'English', 'French', 'Spanish'], prof: ['Beginner', 'Intermediate', 'Advanced', 'Fluent'] });
+    const r = await w.__jobAutofill();
+    const d = w.document;
+    check('language not offered: row left empty', ['l1', 's1', 'l2', 's2'].map((i) => val(d, i)), ['English', 'Fluent', '', '']);
+    check('language not offered: reported', r.unmatched.some((u) => /Korean/.test(u)), true);
+  }
+
+  // ---------- A paged list: the answer only appears after scrolling ----------
+  {
+    const MAJORS = Array.from({ length: 40 }, (_, i) => `Major ${i + 1}`);
+    MAJORS[20] = 'Mechanical Engineering <span>(MEN)</span>';
+    const w = loadPage(`<h3>Education</h3>${plain('maj', '* Major', 'role="combobox"')}<div id="box" style="overflow-y:auto" hidden></div>`, { education: [{ school: 'U', degree: "Bachelor's", field: 'Mechanical Engineering' }] });
+    const d = w.document;
+    const box = d.getElementById('box');
+    let page = 0;
+    for (let i = 0; i < 6; i++) { const row = d.createElement('div'); row.addEventListener('click', () => { d.getElementById('maj').value = row.firstChild.textContent.trim(); box.hidden = true; }); box.append(row); }
+    const render = () => [...box.children].forEach((row, i) => { row.innerHTML = MAJORS[page * 6 + i] || ''; if (!row.firstChild) row.textContent = ''; });
+    d.getElementById('maj').addEventListener('mousedown', () => { page = 0; render(); box.hidden = false; });
+    box.addEventListener('scroll', () => { page = Math.min(page + 1, 6); render(); }); // the widget ignores typing
+    await w.__jobAutofill();
+    check('paged list: found by scrolling, label has extra markup', val(d, 'maj'), 'Mechanical Engineering');
+  }
+
+  // ---------- "Have you worked here?" / "Does a relative work here?" ----------
+  {
+    const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';
+    const page = `<title>Careers</title><label for=pe>Have you ever been, or are you currently employed by Armstrong World Industries, Inc. or any of our subsidiaries</label><select id=pe>${YN}</select>
+      <label for=re>Do you have an immediate family member who works for Armstrong World Industries, Inc.?</label><select id=re>${YN}</select>`;
+    const base = { workExperience: [{ company: 'Acme' }] };
+    const run = async (extra) => { const w = loadPage(page, { ...base, ...extra }); const r = await w.__jobAutofill(); return [val(w.document, 'pe'), val(w.document, 're'), r.unmatched.join(' | ')]; };
+    let out = await run({ relativeEmployers: ['Boeing'] });
+    check('employers: neither is this company -> No / No', out.slice(0, 2), ['No', 'No']);
+    out = await run({ pastEmployers: ['Armstrong World Industries'], relativeEmployers: ['Armstrong World Industries, Inc.'] });
+    check('employers: both are this company -> left for you', out.slice(0, 2), ['No Selection', 'No Selection']);
+    check('employers: reason is given', /worked at Armstrong/.test(out[2]) && /relative works at Armstrong/.test(out[2]), true);
+    out = await run({});
+    check('relative list empty -> no guess, work history still answers', [out[0], out[1]], ['No', 'No Selection']);
+    out = await run({ relativeEmployers: ['none'] });
+    check('relative list says none -> No', out[1], 'No');
+  }
+
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
   process.exit(failures ? 1 : 0);
 })();

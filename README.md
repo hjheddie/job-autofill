@@ -55,3 +55,6 @@ Pages that list repeated rows starting with "From Date" (Company Name, Type of B
 
 ## Tests
 `npm install` then `npm test` runs `test/regression.js`: small jsdom pages (Greenhouse-, Workday- and SuccessFactors-style forms, paginated dropdowns, skills, languages, job rows) checked against a sample profile.
+
+## Employer questions
+"Have you worked here?" and "Does a relative work here?" are answered **No** unless the application is for one of your companies. Your jobs are used automatically for the first question; add other past employers, and companies where relatives work, under **Edit profile → Employers** (type `none` if no relative works anywhere you apply). The application's company is read from the question text, page title, headings and address. If it matches one of your companies the question is left for you, with the reason shown in the popup.

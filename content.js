@@ -16,6 +16,7 @@
     ['graduationDate', /graduation date|date of graduation|date graduated|completion date/],
     ['highestDiscipline', /discipline.*highest|highest.*(discipline|field of study|major)/],
     ['highestEducation', /highest (level of )?(education|degree)/],
+    ['eduStart', /^start date\b/],
     ['degreeCompleted', /degree (been )?completed|completed (this|the) degree|degree completed/],
     ['over18', /at least 18|18 years|over 18|eighteen/],
     ['restrictive', /restrictive covenant|non-?compete|confidentiality agreement|contractual obligation/],
@@ -28,7 +29,7 @@
     ['disability', /disabilit|cc-?305/],
     ['furnish', /wish to (furnish|provide|disclose|self)|furnish this information/],
     ['gender', /\bgender\b|\bsex\b/],
-    ['hispanic', /hispanic|latino/],
+    ['hispanic', /hispanic|latino|^ethnicity$/],
     ['race', /\brace\b|ethnic/],
     ['email', /e-?mail/],
     ['secondaryPhone', /secondary phone|alternate phone|alt\.? phone|other phone|home phone|work phone/],
@@ -197,11 +198,20 @@
     const done = new Date(y, m - 1, 28) <= new Date();
     if (!either && done === expected) return ''; // completed -> "Graduation Date"; not yet -> "Expected Graduation Date"
     const mm = String(m).padStart(2, '0');
-    const dd = String(new Date(y, m, 0).getDate()).padStart(2, '0');
+    const dd = String(e.toDay || new Date(y, m, 0).getDate()).padStart(2, '0');
     const ph = (placeholder || '').toUpperCase();
     if (/^YYYY$/.test(ph)) return String(y);
     if (/MM\W+YYYY/.test(ph) && !/DD/.test(ph)) return `${mm}/${y}`;
     return `${mm}/${dd}/${y}`;
+  }
+
+  // Start date of the first education entry, in the box's own format (MM/DD/YYYY unless the label says MM/YYYY).
+  function eduStartDate(p, label) {
+    const e = (p.education || [])[0];
+    if (!e || !e.fromYear || !e.fromMonth) return '';
+    const mm = String(e.fromMonth).padStart(2, '0');
+    if (/mm\/yyyy/.test(label) && !/dd/.test(label)) return `${mm}/${e.fromYear}`;
+    return `${mm}/${String(e.fromDay || 1).padStart(2, '0')}/${e.fromYear}`;
   }
 
   function valueFor(key, p) {
@@ -212,7 +222,7 @@
         .map((l) => (l.proficiency ? `${l.language} (${l.proficiency})` : l.language)).join(', ');
       case 'phoneExt': case 'secondLastName': return '';
       case 'secondaryPhone': return p.secondaryPhone || '';
-      case 'graduationDate': case 'expectedGraduation': return '';
+      case 'graduationDate': case 'expectedGraduation': case 'eduStart': return '';
       case 'address2': return p.address2 || '';
       case 'preferredName': return p.preferredName || p.firstName || '';
       case 'highestEducation': return highestDone(p)?.degree || ((p.education || []).length ? 'High School' : '');
@@ -228,7 +238,8 @@
           .every((k) => !p[k] || /^decline$/i.test(p[k])) ? 'No' : 'Yes');
       case 'phoneCountryCode': return p.phoneCountryCode || p.country || 'United States';
       case 'phoneType': return p.phoneType || 'Mobile';
-      case 'gender': case 'race': case 'hispanic': case 'veteran': case 'disability': return p[key] || 'Decline';
+      case 'hispanic': return p.hispanic || (p.race === 'Hispanic or Latino' ? 'Yes' : p.race && p.race !== 'Decline' ? 'No' : 'Decline');
+      case 'gender': case 'race': case 'veteran': case 'disability': return p[key] || 'Decline';
       // Fall back to the saved lists so single-field forms still get filled.
       case 'school': case 'gpa': return p[key] || (p.education?.[0] || {})[key] || '';
       case 'degree': return p.degree || p.education?.[0]?.degree || '';
@@ -247,16 +258,18 @@
     const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const word = new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)');
     const real = (x) => x && !PLACEHOLDER.test(x);
+    const neg = (t) => /\b(not|non|no)\b/.test(t);
+    const same = (x) => neg(x) === neg(a); // an option and an answer must agree on negation
     return [
       (x) => x === a,
       (x) => real(x) && x.startsWith(a) && (a.length >= 3 || !/[a-z0-9]/.test(x[a.length] || '')),
       (x) => real(x) && word.test(x),
-      (x) => real(x) && a.length >= 4 && x.includes(a),
-      (x) => real(x) && x.length >= 4 && a.includes(x),
+      (x) => real(x) && same(x) && a.length >= 4 && x.includes(a),
+      (x) => real(x) && same(x) && x.length >= 4 && a.includes(x),
       (x) => { // every word of the answer appears in the option, in any order
         const aw = a.split(/[^a-z0-9]+/).filter((w) => w.length > 2);
         const xs = new Set(x.split(/[^a-z0-9]+/));
-        return real(x) && aw.length >= 2 && aw.every((w) => xs.has(w));
+        return real(x) && same(x) && aw.length >= 2 && aw.every((w) => xs.has(w));
       },
     ];
   }
@@ -305,9 +318,9 @@
       for (const [re, list] of alts) if (re.test(a)) { out.push(...list); break; }
     } else if (key === 'proficiency' || key === 'langProficiency') {
       const alts = [
-        [/native|fluent/i, ['Fluent', 'Native', 'Expert', 'Advanced']],
-        [/advanced/i, ['Advanced', 'Fluent', 'Proficient']],
-        [/intermediate/i, ['Intermediate', 'Proficient', 'Conversational']],
+        [/native|fluent/i, ['Fluent', 'Native', 'Proficient']],
+        [/advanced/i, ['Advanced', 'Proficient']],
+        [/intermediate/i, ['Intermediate', 'Conversational']],
         [/beginner/i, ['Beginner', 'Basic', 'Elementary', 'Novice']],
       ];
       for (const [re, list] of alts) if (re.test(a)) { out.push(...list); break; }
@@ -382,11 +395,46 @@
   // appeared after opening the list and whose text is the answer.
   // The clickable list item for one of the answers: known option markup first, then whichever element
   // changed after opening the list and matches by text (exact, prefix, whole words, all words in any order).
+  // Types like a person (key events per character) so widgets that filter on keyup notice it.
+  async function typeInto(el, text) {
+    setNative(el, '');
+    for (const ch of String(text)) {
+      if (key(el, 'keydown', ch)) { key(el, 'keypress', ch); insertChar(el, ch); }
+      key(el, 'keyup', ch);
+      await sleep(15);
+    }
+  }
+
+  function scrollableAncestor(n) {
+    for (let p = n.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (/(auto|scroll)/.test(getComputedStyle(p).overflowY) && (p.scrollHeight > p.clientHeight + 4 || p.clientHeight === 0)) return p;
+    }
+    return null;
+  }
+
+  // Paged lists only render the items near the scroll position: scroll the list until the answer shows up.
+  async function scrollForTarget(answers, snap, anchor) {
+    const first = changedItems(snap, anchor)[0];
+    const box = first && scrollableAncestor(first);
+    if (!box) return null;
+    let last = -1;
+    for (let step = 0; step < 15; step++) {
+      box.scrollTop += Math.max(box.clientHeight, 200);
+      box.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await sleep(250);
+      const t = findCandidate(visibleOptions(), answers, snap, anchor);
+      if (t) return t;
+      if (box.scrollTop === last) break;
+      last = box.scrollTop;
+    }
+    return null;
+  }
+
   function findCandidate(opts, answers, snap, anchor) {
     const i = pickAny(opts.map((o) => txt(o)), answers);
     if (i >= 0) return opts[i];
     const items = changedItems(snap, anchor);
-    const j = pickAny(items.map((n) => txt(n)), answers);
+    const j = pickAny(items.map((n) => itemText(n)), answers);
     return j >= 0 ? items[j] : null;
   }
 
@@ -405,20 +453,21 @@
       opts = visibleOptions();
     }
     let target = findCandidate(opts, answers, before, el);
+    if (!target) target = await scrollForTarget(answers, before, el);
     // Long or paginated lists only load their first page: type to filter (results may load slowly).
     // Spellings first, then single keywords ("Engineering - Mechanical" is found by typing "mechanical").
     const keywords = [...new Set(words(answers[0]).filter((w) => w.length >= 4))].sort((a, b) => b.length - a.length).slice(0, 2);
     const tries = [...answers.slice(0, 3).map((typed) => [typed, 2400]), ...keywords.map((w) => [w, 1500])];
     for (const [typed, wait] of tries) {
       if (target) break;
-      setNative(el, typed);
+      await typeInto(el, typed);
       for (let t = 0; t < wait && !target; t += 300) {
         await sleep(300);
         target = findCandidate(visibleOptions(), answers, before, el);
       }
     }
     if (!target) { setNative(el, ''); el.blur(); return false; }
-    const picked = txt(target);
+    const picked = itemText(target) || txt(target);
     clickLike(target);
     await sleep(250);
     if (!tookPick(el, picked)) { setNative(el, ''); el.blur(); return false; }
@@ -470,20 +519,28 @@
 
   // What each leaf element said and whether it was visible, so popup items are noticed even when the page
   // re-uses the same DOM nodes (their text changes or they become visible when the list opens).
+  // Text an element says itself: all of it for a leaf, its own text nodes otherwise ("Mechanical Engineering <span>(MEN)</span>").
+  const itemText = (n) => (n.children.length
+    ? [...n.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(' ').trim()
+    : txt(n).trim());
+
   function snapshot() {
     const m = new Map();
-    for (const n of document.body.querySelectorAll('*')) if (!n.children.length) m.set(n, { t: txt(n), v: shown(n) });
+    for (const n of document.body.querySelectorAll('*')) {
+      const t = itemText(n);
+      if (t) m.set(n, { t, v: shown(n) });
+    }
     return m;
   }
 
   const NOT_ITEMS = 'label, legend, option, select, textarea, h1, h2, h3, h4, h5, h6, th, [role=search], nav, header';
   function changedItems(snap, anchor) {
     return [...document.body.querySelectorAll('*')].filter((n) => {
-      if (n.children.length || n === anchor || !shown(n) || n.closest(NOT_ITEMS)) return false;
-      const t = txt(n).trim();
+      if (n === anchor || n.children.length > 3 || !shown(n) || n.closest(NOT_ITEMS)) return false;
+      const t = itemText(n);
       if (!t || t.length > 100) return false;
       const b = snap.get(n);
-      return !b || b.t !== txt(n) || !b.v;
+      return !b || b.t !== t || !b.v;
     });
   }
 
@@ -492,7 +549,7 @@
     const want = norm(skill);
     const rank = (t) => (t === want ? 0 : t.startsWith(want) ? 1 : t.includes(want) ? 2 : 9);
     return changedItems(snap)
-      .map((n) => [n, rank(norm(txt(n)))])
+      .map((n) => [n, rank(norm(itemText(n)))])
       .filter(([, r]) => r <= maxRank)
       .sort((a, b) => a[1] - b[1])
       .map(([n]) => n);
@@ -798,6 +855,36 @@
     }
   }
 
+  // ---- "Have you worked here?" / "Does a relative work here?": No unless the application is for one of your companies ----
+  const LEGAL = /\b(incorporated|inc|llc|corp|corporation|co|company|ltd|limited|plc|gmbh|the)\b/g;
+  const coName = (s) => norm(s).replace(/[.,'’]/g, '').replace(LEGAL, ' ').replace(/\s+/g, ' ').trim();
+  const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map((x) => String(x).trim()).filter(Boolean);
+
+  // Who the application is with: page title, site name, logo/headings and the address (e.g. ?company=Hubbell).
+  function pageSignals() {
+    const metas = ['og:site_name', 'application-name', 'og:title']
+      .map((n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.content || '').join(' ');
+    const heads = [...document.querySelectorAll('h1, h2, img[alt]')].slice(0, 8).map((n) => n.alt || txt(n)).join(' ');
+    let href = location.href;
+    try { href = decodeURIComponent(href); } catch (e) { /* keep the raw address */ }
+    return coName(`${document.title} ${metas} ${heads} ${href}`);
+  }
+
+  function employerAnswer(key, p, label) {
+    const list = key === 'previousEmployee'
+      ? [...(p.workExperience || []).map((e) => e.company), ...lines(p.pastEmployers)]
+      : lines(p.relativeEmployers);
+    const names = list.filter((n) => n && !/^none$/i.test(n));
+    if (!names.length && !list.some((n) => /^none$/i.test(n))) return { value: '', match: '' }; // nothing listed: don't guess
+    const text = `${coName(label)} ${pageSignals()}`;
+    const hit = names.find((n) => {
+      const c = coName(n);
+      return c && new RegExp('(^|[^a-z0-9])' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-z0-9]|$)').test(text);
+    });
+    if (hit) return { value: '', match: `${key === 'previousEmployee' ? "you've worked at" : 'a relative works at'} ${hit}: answer this one yourself` };
+    return { value: 'No', match: '' };
+  }
+
   window.__jobAutofill = async function (profileOverride) {
     const p = profileOverride || (await window.JA_PROFILES.active()) || {};
     const filled = [];
@@ -809,11 +896,11 @@
     await fillSections(p, filled, covered);
     const seen = new WeakSet();
     let langRow = 0;
+    let skipLangRatings = false;
     const pendingOther = []; // order in which degree/major dropdowns failed
     const otherNeeded = new Set(); // degree/major dropdowns that had no match, so their "If other" box is filled
     async function pass() {
       const els = collect(document, []).filter((el) => !seen.has(el) && !covered.some((r) => r.contains(el)));
-      els.forEach((el) => seen.add(el));
       const radios = new Map();
 
       for (const el of els) {
@@ -829,6 +916,7 @@
         }
         if (el.closest('[role=search], nav, header, [id*=cookie i], [class*=cookie i], [id*=onetrust i], [class*=onetrust i]')) continue;
         if (type !== 'file' && !shown(el)) continue;
+        seen.add(el); // disabled or hidden fields are retried on the next pass
         let label = labelText(el);
         if (/^search\b/.test(label)) continue;
         if (/^if (other|not listed)\b/.test(label)) { // helper box beside a dropdown: only when the dropdown had no match
@@ -893,12 +981,19 @@
         if (answer == null && key) answer = valueFor(key, p);
       // Language Skills rows: the Nth "Language" box gets the Nth language, its ratings get that row's level.
       if (key === 'languageName') { langRow++; answer = (p.languages || [])[langRow - 1]?.language || ''; }
-      else if (key === 'langProficiency') answer = (p.languages || [])[Math.max(langRow - 1, 0)]?.proficiency || '';
+      else if (key === 'langProficiency') { if (skipLangRatings) continue; answer = (p.languages || [])[Math.max(langRow - 1, 0)]?.proficiency || ''; }
       else if (key === 'graduationDate' || key === 'expectedGraduation') answer = gradDate(p, key === 'expectedGraduation', el.placeholder, /anticipated|expected/.test(label));
+      if (key === 'eduStart') answer = eduStartDate(p, label);
+      let employerNote = '';
+      if (!answer && (key === 'previousEmployee' || key === 'relatedEmployee')) { // "No" unless the application is for one of your companies
+        const auto = employerAnswer(key, p, label);
+        answer = auto.value;
+        employerNote = auto.match;
+      }
       if (key === 'languages' && (isSelect || isListbox || isCombo)) answer = (p.languages || [])[0]?.language || '';
         if (!answer) {
-          const quiet = ['phoneExt', 'secondLastName', 'middleName', 'secondaryPhone', 'address2', 'graduationDate', 'expectedGraduation'].includes(key) || /^if (yes|so|you)\b/.test(label);
-          if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${key ? `no "${key}" saved in your profile` : 'field not recognized'}`);
+          const quiet = ['phoneExt', 'secondLastName', 'middleName', 'secondaryPhone', 'address2', 'graduationDate', 'expectedGraduation', 'eduStart'].includes(key) || /^if (yes|so|you)\b/.test(label);
+          if (label && !quiet) unmatched.push(`${label.slice(0, 70)} — ${employerNote || (key ? `no "${key}" saved in your profile` : 'field not recognized')}`);
           continue;
         }
         const answers = variants(key === 'highestEducation' ? 'degree' : key, answer);
@@ -912,7 +1007,10 @@
         else if (isListbox) ok = await fillListbox(el, answers);
         else if (isSelect) ok = fillSelect(el, answers);
         else if (isCombo) ok = await fillCombobox(el, answers);
+        else if (key === 'graduationDate' || key === 'expectedGraduation' || key === 'eduStart') ok = await typeFormatted(el, answer);
         else { setNative(el, answer); ok = true; }
+
+        if (key === 'languageName') skipLangRatings = !ok;
 
         if (!ok && (key === 'degree' || key === 'major')) {
           otherNeeded.add(key);
@@ -921,6 +1019,10 @@
           if (isListbox) await fillListbox(el, other); else if (isSelect) fillSelect(el, other); else if (isCombo) await fillCombobox(el, other);
           const now = shownValue(el);
           ok = !!now && !PLACEHOLDER.test(now);
+        }
+        if (!ok && key === 'hispanic' && /ethnic/.test(label) && p.race && p.race !== 'Decline') {
+          const byRace = variants('race', p.race);
+          if (isListbox) ok = await fillListbox(el, byRace); else if (isSelect) ok = fillSelect(el, byRace); else if (isCombo) ok = await fillCombobox(el, byRace);
         }
         if (ok) { mark(el); filled.push({ label: label.slice(0, 60), key: key || 'custom' }); }
         else unmatched.push(`${label.slice(0, 70)} — no option matches "${answers[0]}"${answers[0] === 'Decline' ? ' (this list has no decline choice; pick one yourself)' : ''}`);
@@ -941,8 +1043,10 @@
     }
 
     await pass();
-    await sleep(500); // fields revealed by earlier answers (e.g. self-ID after "wish to furnish")
-    await pass();
+    for (let k = 0; k < 2; k++) { // fields revealed or enabled by earlier answers (self-ID, race after ethnicity)
+      await sleep(600);
+      await pass();
+    }
 
     window.__jobAutofillLast = { filled: filled.map((f) => f.label), unmatched: [...new Set(unmatched)] };
     return { filled, unmatched: [...new Set(unmatched)].slice(0, 25) };
@@ -999,7 +1103,8 @@
     if (!y || !m) return '';
     const mm = String(m).padStart(2, '0');
     if (/mm\/yyyy/.test(label) && !/dd/.test(label)) return `${mm}/${y}`;
-    const dd = which === 'from' ? '01' : String(new Date(Number(y), Number(m), 0).getDate()).padStart(2, '0');
+    const day = e[which + 'Day'];
+    const dd = day ? String(day).padStart(2, '0') : which === 'from' ? '01' : String(new Date(Number(y), Number(m), 0).getDate()).padStart(2, '0');
     return `${mm}/${dd}/${y}`;
   }
 
@@ -1009,7 +1114,7 @@
     'firstName', 'middleName', 'lastName', 'secondLastName', 'fullName', 'preferredName', 'address', 'address2',
     'city', 'state', 'zip', 'country', 'linkedin', 'github', 'portfolio', 'salary', 'currentCompany', 'currentTitle',
     'school', 'degree', 'major', 'gpa', 'skills', 'languages', 'languageName', 'langProficiency', 'graduationDate',
-    'expectedGraduation', 'degreeCompleted']);
+    'expectedGraduation', 'eduStart', 'degreeCompleted']);
 
   // What the field currently shows, or '' while it still holds a placeholder such as "No Selection".
   function currentAnswer(el) {

@@ -94,8 +94,8 @@ const LISTS = {
       ['employmentType', 'Employment type', ['', 'Full-time', 'Part-time', 'Internship', 'Contract']],
       ['industry', 'Industry / type of business'],
       ['current', 'I currently work here', 'checkbox'],
-      ['fromMonth', 'Start month', MONTHS], ['fromYear', 'Start year'],
-      ['toMonth', 'End month', MONTHS], ['toYear', 'End year'],
+      ['fromMonth', 'Start month', MONTHS], ['fromDay', 'Start day'], ['fromYear', 'Start year'],
+      ['toMonth', 'End month', MONTHS], ['toDay', 'End day'], ['toYear', 'End year'],
       ['description', 'Role description', 'textarea'],
     ],
   },
@@ -111,8 +111,8 @@ const LISTS = {
     fields: [
       ['school', 'School or university'], ['degree', 'Degree', DEGREES], ['field', 'Field of study'],
       ['gpa', 'GPA'],
-      ['fromMonth', 'Start month', MONTHS], ['fromYear', 'Start year'],
-      ['toMonth', 'Graduation month (actual or expected)', MONTHS], ['toYear', 'Graduation year (actual or expected)'],
+      ['fromMonth', 'Start month', MONTHS], ['fromDay', 'Start day'], ['fromYear', 'Start year'],
+      ['toMonth', 'Graduation month (actual or expected)', MONTHS], ['toDay', 'Graduation day'], ['toYear', 'Graduation year (actual or expected)'],
     ],
   },
 };
@@ -168,6 +168,13 @@ form.insertAdjacentHTML('beforeend', `
   <h2>Skills</h2>
   <label>Comma or line separated. Used for "Skills" boxes, including the search-and-pick ones.
     <textarea name="skills" rows="3" placeholder="Python, SolidWorks, MATLAB, AutoCAD"></textarea>
+  </label>
+  <h2>Employers</h2>
+  <label>Other employers you have worked for, one per line (jobs above are included automatically). Used to answer "have you worked here?" with No unless the application is for one of them.
+    <textarea name="pastEmployers" rows="3"></textarea>
+  </label>
+  <label>Companies where a relative works, one per line (type <code>none</code> if there are none). Used to answer "does a relative work here?" with No unless the application is for one of them.
+    <textarea name="relativeEmployers" rows="3"></textarea>
   </label>
   <h2>Saved answers</h2>
   <label>One per line: <code>question text =&gt; answer</code>. Matches when the form's label contains the question text.
@@ -236,6 +243,7 @@ function collectForm() {
   const profile = {};
   new FormData(form).forEach((v, k) => { if (k !== 'resume') profile[k] = String(v).trim(); });
   profile.skills = String(profile.skills || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+  for (const k of ['pastEmployers', 'relativeEmployers']) profile[k] = String(profile[k] || '').split('\n').map((x) => x.trim()).filter(Boolean);
   if (profile.state) profile.state = canonState(profile.state);
   if (profile.country) profile.country = canonCountry(profile.country);
   for (const name of Object.keys(lists)) {
@@ -254,7 +262,7 @@ function populateForm(profile) {
   for (const el of form.elements) {
     if (!el.name) continue;
     const v = profile[el.name];
-    el.value = Array.isArray(v) ? v.join(', ') : v != null ? v : '';
+    el.value = Array.isArray(v) ? v.join(el.name === 'skills' ? ', ' : '\n') : v != null ? v : '';
   }
   for (const name of Object.keys(lists)) {
     lists[name] = (profile[name] || []).map((e) => ({ ...e }));
