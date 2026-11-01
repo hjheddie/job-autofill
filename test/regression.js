@@ -356,7 +356,7 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
 
   // ---------- Page structure copy: keeps labels and options, never typed values ----------
   {
-    const w = loadPage('<form><h3>Contact</h3><label for=e>Email</label><input id=e value="jane.doe@example.com"><select id=s><option>One</option></select><p>Call 2175551234</p><script>var s1='secret'</script></form>', {});
+    const w = loadPage('<form><h3>Contact</h3><label for=e>Email</label><input id=e value="jane.doe@example.com"><select id=s><option>One</option></select><p>Call 2175551234</p><script>var s1=1;/*secret*/</script></form>', {});
     const out = w.__jobAutofillStructure().markup;
     check('structure: keeps labels and options', ['"Email"', '"One"', '<select'].every((x) => out.includes(x)), true);
     check('structure: drops typed values, masks emails and numbers, skips scripts', [out.includes('jane.doe'), out.includes('2175551234'), out.includes('secret')], [false, false, false]);
