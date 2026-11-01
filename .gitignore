@@ -10,3 +10,6 @@ Thumbs.db
 *.docx
 *profile*.json
 resume*
+
+# The scheduler project now lives in its own repository (illini-scheduler)
+scheduler/

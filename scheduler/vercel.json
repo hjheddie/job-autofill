@@ -1,5 +1,0 @@
-{
-  "framework": null,
-  "rewrites": [{ "source": "/api/:p*", "destination": "/api/index?p=:p*" }],
-  "functions": { "api/index.js": { "maxDuration": 30, "includeFiles": "data/**" } }
-}
