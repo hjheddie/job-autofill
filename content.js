@@ -663,36 +663,76 @@
   // Multi-select search boxes (Workday "Skills"): type a keyword, press Enter to run the search
   // (if suggestions don't appear by themselves), then click the matching result in the list.
   const missingSkills = [];
+  // Suggestions of a skills search: the usual option markup, plus menu items outside the page's navigation.
+  const skillOptions = () => [...document.querySelectorAll('[role=option], [role=listbox] li, [data-automation-id="promptOption"], [data-automation-id="menuItem"], [role=menuitem], [role=menuitemcheckbox]')]
+    .filter((o) => (o.offsetParent !== null || o.getClientRects().length) && !o.closest('nav, header'));
+  async function waitForSkillOptions(ms) {
+    for (let t = 0; t < ms; t += 150) {
+      const opts = skillOptions();
+      if (opts.length) return opts;
+      await sleep(150);
+    }
+    return [];
+  }
+  const describe = (n) => ({ tag: n.tagName.toLowerCase(), role: n.getAttribute('role') || undefined, auto: n.getAttribute('data-automation-id') || undefined,
+    cls: String(n.className || '').slice(0, 50) || undefined, text: itemText(n).slice(0, 40) });
+
+  // Type a term into a search box, press Enter if nothing is suggested, then click the matching result.
+  async function searchPick(el, term, answers, t) {
+    el.focus();
+    clickLike(el);
+    await typeInto(el, term); // real key events, like typing
+    const pick = (opts) => { const k = pickAny(opts.map((o) => txt(o)), answers); return k >= 0 ? opts[k] : null; };
+    const before = snapshot();
+    let opts = await waitForSkillOptions(1200);
+    t.steps.push({ typed: term, afterTyping: opts.length, sample: opts.slice(0, 4).map((o) => describe(o)) });
+    let target = pick(opts);
+    if (!target) {
+      pressEnter(el);
+      opts = await waitForSkillOptions(8000); // the search can be slow
+      t.steps.push({ afterEnter: opts.length, sample: opts.slice(0, 6).map((o) => describe(o)) });
+      target = pick(opts);
+      if (!target) {
+        const fresh = await waitForNewItems(before, answers[0], 1500);
+        t.steps.push({ newItems: fresh.length, sample: changedItems(before, el).slice(0, 8).map((n) => describe(n)) });
+        target = fresh[0] || null;
+      }
+    }
+    if (!target) return false;
+    t.picked = itemText(target).slice(0, 40);
+    clickLike(target);
+    await sleep(400);
+    return true;
+  }
+
   async function fillSkills(el, list) {
     let added = 0;
     missingSkills.length = 0;
+    const log = (window.__jobAutofillSkillTrace = []);
     for (const skill of list.slice(0, 20)) {
-      el.focus();
-      clickLike(el);
-      setNative(el, skill);
-      let target = null;
-      const known = await waitForOptions(600);
-      const k = pickAny(known.map((o) => txt(o)), [skill]);
-      if (k >= 0) target = known[k];
-      if (!target) {
-        const before = snapshot();
-        pressEnter(el);
-        const opts = await waitForOptions(3000);
-        const i = pickAny(opts.map((o) => txt(o)), [skill]);
-        if (i >= 0) target = opts[i];
-        else target = (await waitForNewItems(before, skill, 1500))[0] || null;
-      }
-      if (target) {
-        clickLike(target);
-        added++;
-        await sleep(400);
-      } else {
-        missingSkills.push(skill);
-      }
+      const t = { skill, steps: [] };
+      log.push(t);
+      if (await searchPick(el, skill, [skill], t)) added++; else { t.picked = null; missingSkills.push(skill); }
       if (el.value) setNative(el, '');
       await sleep(150);
     }
     return added > 0;
+  }
+
+  // Single-answer search boxes in a multi-select container (Workday "Field of Study"): same search-and-click.
+  async function fillSearchSelect(el, answers) {
+    const log = (window.__jobAutofillSkillTrace = window.__jobAutofillSkillTrace || []);
+    const t = { skill: answers[0], steps: [] };
+    log.push(t);
+    for (const term of answers.slice(0, 2)) {
+      if (await searchPick(el, term, answers, t)) return true;
+      if (el.value) setNative(el, '');
+    }
+    // a long name may only be found by its main words
+    const key = [...new Set(words(answers[0]).filter((w) => w.length >= 4))].sort((a, b) => b.length - a.length)[0];
+    if (key && await searchPick(el, key, answers, t)) return true;
+    if (el.value) setNative(el, '');
+    return false;
   }
 
   function fillSelect(el, answers) {
@@ -1109,6 +1149,7 @@
         else if (isListbox) ok = await fillListbox(el, answers);
         else if (isSelect) ok = fillSelect(el, answers);
         else if (isCombo) ok = await fillCombobox(el, answers);
+        else if (el.closest('[data-automation-id*="multiSelect" i]')) ok = await fillSearchSelect(el, answers);
         else if (key === 'graduationDate' || key === 'expectedGraduation' || key === 'eduStart' || key === 'availableDate') ok = await typeFormatted(el, answer);
         else { setNative(el, answer); ok = true; }
 
@@ -1454,6 +1495,6 @@
       hiddenFields: fields.filter((f) => !f.shown).length,
       frames: document.querySelectorAll('iframe').length,
     };
-    return { page: location.origin + location.pathname, topFrame: window === window.top, outline, sections: describeSections(), lastRun: window.__jobAutofillLast, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
+    return { page: location.origin + location.pathname, topFrame: window === window.top, outline, sections: describeSections(), lastRun: window.__jobAutofillLast, skillTrace: window.__jobAutofillSkillTrace, trace: window.__jobAutofillTrace, fields: fields.slice(0, 250) };
   };
 })();

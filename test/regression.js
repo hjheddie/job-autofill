@@ -352,6 +352,31 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('typo in the saved major still picks "Mechanical Engineering"', val(d, 'maj'), 'Mechanical Engineering');
   }
 
+  // ---------- Workday "Field of Study": a search box in a multi-select container, picked from the results ----------
+  {
+    const FIELDS = ['Electro-Mechanical Engineering Tech', 'Mechanical Engineering', 'Mechanics'];
+    const w = loadPage('<h4>Education</h4><div data-automation-id="formField-fieldOfStudy"><label for=fos>Field of Study</label><div data-automation-id="multiSelectContainer"><div id=chips></div><input id=fos placeholder="Search"></div><div id=host></div></div>',
+      { education: [{ school: 'U', degree: "Bachelor's", field: 'Mechanical Engineering' }] });
+    const d = w.document;
+    const inp = d.getElementById('fos');
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      setTimeout(() => {
+        const v = inp.value.toLowerCase();
+        d.getElementById('host').innerHTML = '';
+        FIELDS.filter((c) => v && c.toLowerCase().includes(v)).forEach((t) => {
+          const row = d.createElement('div');
+          row.setAttribute('data-automation-id', 'promptOption');
+          row.innerHTML = `${t}`;
+          row.addEventListener('click', () => { const c = d.createElement('div'); c.setAttribute('data-automation-id', 'selectedItem'); c.textContent = t; d.getElementById('chips').append(c); inp.value = ''; d.getElementById('host').innerHTML = ''; });
+          d.getElementById('host').append(row);
+        });
+      }, 400);
+    });
+    await w.__jobAutofill();
+    check('workday field of study: picked from the search results', [...d.getElementById('chips').children].map((c) => c.textContent), ['Mechanical Engineering']);
+  }
+
   // ---------- "Have you worked here?" / "Does a relative work here?" ----------
   {
     const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';
