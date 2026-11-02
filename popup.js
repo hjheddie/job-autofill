@@ -109,10 +109,7 @@ document.getElementById('structure').onclick = async () => {
   out.className = '';
   try {
     const frames = await inPage(() => window.__jobAutofillStructure());
-    const text = frames.map((f) => `### ${f.page}${f.topFrame ? '' : ' (frame)'}
-${f.markup}`).join('
-
-');
+    const text = frames.map((f) => '### ' + f.page + (f.topFrame ? '' : ' (frame)') + '\n' + f.markup).join('\n\n');
     const ta = Object.assign(document.createElement('textarea'), { value: text });
     document.body.append(ta);
     ta.select();
