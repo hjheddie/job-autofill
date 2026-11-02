@@ -328,6 +328,30 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('double-highlighted results: the exact item wins over the longer one listed first', val(d, 'maj'), 'Mechanical Engineering');
   }
 
+  // ---------- A typo in the saved answer ("Engieering") still finds the right item ----------
+  {
+    const ALL = ['Electro-Mechanical Engineering Tech', 'Mechanical Engineering'];
+    const w = loadPage(`<h3>Education</h3>${plain('maj', '* Major', 'role="combobox"')}<ul id="res" hidden></ul>`, { education: [{ school: 'U', degree: "Bachelor's", field: 'Mechanical Engieering' }] });
+    const d = w.document;
+    const res = d.getElementById('res');
+    const input = d.getElementById('maj');
+    input.addEventListener('input', () => setTimeout(() => {
+      const q = input.value.toLowerCase();
+      res.innerHTML = '';
+      ALL.filter((x) => x.toLowerCase().includes(q)).forEach((x) => {
+        const li = d.createElement('li');
+        const at = x.toLowerCase().indexOf(q);
+        li.innerHTML = `${x.slice(0, at)}<b><i>${x.slice(at, at + q.length)}</i></b>${x.slice(at + q.length)}`;
+        li.addEventListener('click', () => { input.value = li.textContent.trim(); res.hidden = true; });
+        res.append(li);
+      });
+      res.hidden = !res.children.length;
+      if (!res.children.length) { res.innerHTML = '<li>There were no results</li>'; res.hidden = false; }
+    }, 300));
+    await w.__jobAutofill();
+    check('typo in the saved major still picks "Mechanical Engineering"', val(d, 'maj'), 'Mechanical Engineering');
+  }
+
   // ---------- "Have you worked here?" / "Does a relative work here?" ----------
   {
     const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';

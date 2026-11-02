@@ -291,14 +291,26 @@
         if (i >= 0) return i;
       }
     }
-    return noReverse ? -1 : closestOption(t, list);
+    return closestOption(t, list, noReverse ? 0.8 : 0.6);
   }
 
   // Last resort for different wording: the option sharing the most words with an answer ("Bachelor's
   // degree" ~ "Bachelors Degree", "U.S. citizen" ~ "US Citizen"). Needs to agree on negation.
   const FUZZY_STOP = new Set(['the', 'a', 'an', 'of', 'and', 'in', 'to', 'or', 'your', 'you', 'i', 'am', 'are', 'is', 'have', 'been']);
   const stems = (x) => new Set(x.replace(/[''.]/g, '').split(/[^a-z0-9]+/).filter((w) => w && !FUZZY_STOP.has(w)).map((w) => (w.length > 3 ? w.replace(/(es|s)$/, '') : w)));
-  function closestOption(t, list) {
+  // Edit distance, for typos in a saved answer ("Engieering").
+  function editDistance(a, b) {
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  // Words match when equal, or one typo apart (two for long words).
+  const sameWord = (a, b) => a === b || (Math.min(a.length, b.length) >= 5 && editDistance(a, b) <= (a.length >= 9 ? 2 : 1));
+  function closestOption(t, list, min = 0.6) {
     let best = -1, top = 0;
     for (const a of list) {
       const as = stems(a);
@@ -307,9 +319,9 @@
       t.forEach((x, i) => {
         if (!x || PLACEHOLDER.test(x) || /\b(not|non|no)\b/.test(x) !== na) return;
         const xs = stems(x);
-        const common = [...as].filter((w) => xs.has(w)).length;
+        const common = [...as].filter((w) => [...xs].some((v) => sameWord(w, v))).length;
         const score = (2 * common) / (as.size + xs.size);
-        if (common && score >= 0.6 && score > top) { top = score; best = i; }
+        if (common && score >= min && score > top) { top = score; best = i; }
       });
     }
     return best;
