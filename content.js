@@ -602,13 +602,15 @@
 
   // The item an element belongs to: a highlighted fragment ("<b>Mechanical Engineering</b> Technology") is part
   // of its row, so climb while the parent says more and this element is its only text-bearing child.
+  // A wrapper with the same text (<b><i>text</i></b>) is climbed too; a list item, option or row ends the climb.
   function rowOf(n) {
     for (;;) {
+      if (n.matches('li, tr, option, [role=option], [role=menuitem], [role=listitem]')) return n;
       const p = n.parentElement;
-      if (!p || p === document.body) return n;
+      if (!p || p === document.body || /^(UL|OL|TABLE|TBODY|SELECT)$/.test(p.tagName) || p.matches('[role=listbox], [role=list], [role=menu]')) return n;
       const pt = itemText(p);
-      if (pt === itemText(n) || pt.length > 100) return n;
-      if ([...p.children].filter((c) => itemText(c)).length !== 1) return n;
+      if (pt.length > 100) return n;
+      if (pt !== itemText(n) && [...p.children].filter((c) => itemText(c)).length !== 1) return n;
       n = p;
     }
   }

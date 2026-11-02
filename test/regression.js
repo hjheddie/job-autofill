@@ -305,6 +305,29 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('highlighted search results: exact major chosen', [val(d, 'maj'), (w.__jobAutofillTrace || []).length > 0], ['Mechanical Engineering', true]);
   }
 
+  // ---------- Highlight wrapped twice (<b><i>) and a longer item listed first: "Electro-Mechanical Engineering Tech" ----------
+  {
+    const ALL = ['Electro-Mechanical Engineering Tech', 'Mechanical Engineering'];
+    const w = loadPage(`<h3>Education</h3>${plain('maj', '* Major', 'role="combobox"')}<ul id="res" hidden></ul>`, { education: [{ school: 'U', degree: "Bachelor's", field: 'Mechanical Engineering' }] });
+    const d = w.document;
+    const res = d.getElementById('res');
+    const input = d.getElementById('maj');
+    const draw = (q) => {
+      res.innerHTML = '';
+      ALL.forEach((t) => {
+        const li = d.createElement('li');
+        const at = t.toLowerCase().indexOf(q);
+        li.innerHTML = `${t.slice(0, at)}<b><i>${t.slice(at, at + q.length)}</i></b>${t.slice(at + q.length)}`;
+        li.addEventListener('click', () => { input.value = li.textContent.trim(); res.hidden = true; });
+        res.append(li);
+      });
+      res.hidden = false;
+    };
+    input.addEventListener('input', () => setTimeout(() => { const q = input.value.toLowerCase(); if (q) draw(q); }, 300));
+    await w.__jobAutofill();
+    check('double-highlighted results: the exact item wins over the longer one listed first', val(d, 'maj'), 'Mechanical Engineering');
+  }
+
   // ---------- "Have you worked here?" / "Does a relative work here?" ----------
   {
     const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';
