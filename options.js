@@ -6,28 +6,30 @@ const RACES = [
 ];
 
 const SECTIONS = [
-  ['Contact', [
+  ['Contact', 'contact', [
     ['firstName', 'First name'], ['middleName', 'Middle name'], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'],
     ['address', 'Street address'], ['city', 'City'], ['state', 'State / province', 'states'],
     ['zip', 'ZIP / postal code'], ['country', 'Country', 'countries'],
   ]],
-  ['Links', [
+  ['Links', 'links', [
     ['linkedin', 'LinkedIn URL'], ['github', 'GitHub URL'], ['portfolio', 'Website / portfolio'],
   ]],
-  ['Other', [
+  ['Job preferences', 'jobPrefs', [
     ['salary', 'Salary expectation'],
     ['availableDate', 'Available start date (MM/DD/YYYY)'],
+  ]],
+  ['Standard answers', 'answers', [
     ['over18', 'At least 18 years old?', YESNO],
     ['restrictive', 'Bound by non-compete / restrictive agreements?', YESNO],
     ['previousEmployee', 'Previously employed by the company? (blank = answer each time)', YESNO],
     ['referral', 'Referred by a current employee?', YESNO],
     ['relatedEmployee', 'Related to an employee?', YESNO],
   ]],
-  ['Work authorization', [
+  ['Work authorization', 'workAuth', [
     ['workAuth', 'Legally authorized to work?', YESNO],
     ['sponsorship', 'Require visa sponsorship?', YESNO],
   ]],
-  ['Voluntary self-identification (blank or "Decline" = decline to answer)', [
+  ['Voluntary self-identification (blank or "Decline" = decline to answer)', 'selfId', [
     ['furnish', 'Answer voluntary self-ID questions? (blank = No if all below are Decline)', YESNO],
     ['gender', 'Gender', EEO],
     ['race', 'Race', RACES],
@@ -76,8 +78,8 @@ function canonCountry(v) {
   return aliases[v.toLowerCase()] || COUNTRIES.find((c) => c.toLowerCase() === v.toLowerCase()) || v;
 }
 
-for (const [title, fields] of SECTIONS) {
-  const h = document.createElement('h2'); h.textContent = title; form.append(h);
+for (const [title, group, fields] of SECTIONS) {
+  const h = document.createElement('h2'); h.textContent = title; h.dataset.group = group; form.append(h);
   const g = document.createElement('div'); g.className = 'grid';
   fields.forEach((f) => g.append(field(f)));
   form.append(g);
@@ -149,7 +151,7 @@ function renderList(name) {
 }
 
 for (const name of Object.keys(LISTS)) {
-  const h = document.createElement('h2'); h.textContent = LISTS[name].title; form.append(h);
+  const h = document.createElement('h2'); h.textContent = LISTS[name].title; h.dataset.group = name; form.append(h);
   const box = document.createElement('div'); box.id = 'list-' + name; form.append(box);
   const add = document.createElement('button'); add.type = 'button'; add.className = 'secondary';
   add.textContent = '+ ' + LISTS[name].add;
@@ -158,7 +160,7 @@ for (const name of Object.keys(LISTS)) {
 }
 
 form.insertAdjacentHTML('beforeend', `
-  <h2>Resume</h2>
+  <h2 data-group="resume">Resume</h2>
   <label>PDF / DOC (max 5 MB) <input type="file" id="resume" accept=".pdf,.doc,.docx"></label>
   <div id="resumeRow" hidden>
     <span id="resumeName"></span>
@@ -166,21 +168,31 @@ form.insertAdjacentHTML('beforeend', `
     <button type="button" id="resumeRemove" class="secondary">Remove</button>
   </div>
   <small id="resumeNote"></small>
-  <h2>Skills</h2>
+  <h2 data-group="skills">Skills</h2>
   <label>Comma or line separated. Used for "Skills" boxes, including the search-and-pick ones.
     <textarea name="skills" rows="3" placeholder="Python, SolidWorks, MATLAB, AutoCAD"></textarea>
   </label>
-  <h2>Employers</h2>
+  <h2 data-group="employers">Employers</h2>
   <label>Other employers you have worked for, one per line (jobs above are included automatically). Used to answer "have you worked here?" with No unless the application is for one of them.
     <textarea name="pastEmployers" rows="3"></textarea>
   </label>
   <label>Companies where a relative works, one per line (type <code>none</code> if there are none). Used to answer "does a relative work here?" with No unless the application is for one of them.
     <textarea name="relativeEmployers" rows="3"></textarea>
   </label>
-  <h2>Saved answers</h2>
+  <h2 data-group="savedAnswers">Saved answers</h2>
   <label>One per line: <code>question text =&gt; answer</code>. Matches when the form's label contains the question text.
     <textarea id="qa" rows="6" placeholder="how did you hear about us => LinkedIn&#10;willing to relocate => Yes"></textarea>
   </label>`);
+
+// Each section can be kept per profile or shared by all of them.
+const SHARE_NOTE = 'Shared sections are edited once and used by every profile.';
+for (const h of form.querySelectorAll('h2[data-group]')) {
+  const l = document.createElement('label');
+  l.className = 'share';
+  l.innerHTML = '<input type="checkbox"> same for all profiles';
+  l.firstChild.dataset.share = h.dataset.group;
+  h.append(l);
+}
 
 const sizeLabel = (b64) => {
   const kb = Math.round((b64.length * 3) / 4 / 1024);
@@ -255,8 +267,46 @@ function collectForm() {
     .filter((p) => p.length >= 2 && p[0].trim() && p[1].trim())
     .map((p) => ({ q: p[0].trim(), a: p.slice(1).join('=>').trim() }));
   profile.resume = resume || null;
-  return profile;
+  return profile; // flat; split into per-profile and shared parts when saved
 }
+
+// The values shown for the active profile: its own, with the shared sections' values on top.
+const effective = () => JA_PROFILES.merge(current().data, store.shared);
+
+function syncShareBoxes() {
+  for (const box of form.querySelectorAll('input[data-share]')) box.checked = !!store.shared.groups[box.dataset.share];
+  const note = document.getElementById('shareNote');
+  if (note) note.textContent = SHARE_NOTE;
+}
+
+// Turning sharing on makes what is shown the shared copy; turning it off gives every profile a copy of it.
+form.addEventListener('change', async (e) => {
+  const box = e.target.closest && e.target.closest('input[data-share]');
+  if (!box) return;
+  const group = box.dataset.share;
+  const title = JA_PROFILES.GROUPS[group].title;
+  const keys = JA_PROFILES.GROUPS[group].keys;
+  if (box.checked) {
+    const others = Object.keys(store.profiles).length > 1;
+    if (!confirm(`Use the same "${title}" for every profile?
+
+What is shown here becomes the shared copy.${others ? ' The other profiles keep their old values stored, but stop using them.' : ''}`)) { box.checked = false; return; }
+    const flat = collectForm();
+    store.shared.groups[group] = true;
+    for (const k of keys) store.shared.data[k] = flat[k];
+  } else {
+    if (!confirm(`Keep "${title}" separately for each profile?
+
+Every profile starts with a copy of the shared values.`)) { box.checked = true; return; }
+    for (const p of Object.values(store.profiles)) {
+      for (const k of keys) { if (store.shared.data[k] !== undefined) p.data[k] = JSON.parse(JSON.stringify(store.shared.data[k])); else delete p.data[k]; }
+    }
+    store.shared.groups[group] = false;
+  }
+  dirty = true;
+  await save_();
+  flash(box.checked ? `"${title}" is now shared` : `"${title}" is now per profile`);
+});
 
 function populateForm(profile) {
   profile = profile || {};
@@ -277,13 +327,14 @@ function populateForm(profile) {
 }
 
 function renderBar() {
+  syncShareBoxes();
   sel.textContent = '';
   for (const [id, p] of Object.entries(store.profiles)) sel.append(new Option(p.name, id, false, id === store.activeProfileId));
   sel.value = store.activeProfileId;
   document.getElementById('pDel').disabled = Object.keys(store.profiles).length < 2;
 }
 
-const persist = () => JA_PROFILES.save(store.profiles, store.activeProfileId);
+const persist = () => JA_PROFILES.save(store.profiles, store.activeProfileId, store.shared);
 const current = () => store.profiles[store.activeProfileId];
 const confirmDiscard = () => !dirty || confirm('You have unsaved changes in this profile. Discard them?');
 
@@ -296,7 +347,7 @@ async function switchTo(id) {
   store.activeProfileId = id;
   await persist();
   renderBar();
-  populateForm(current().data);
+  populateForm(effective());
 }
 
 sel.onchange = async () => {
@@ -317,7 +368,7 @@ document.getElementById('pDup').onclick = async () => {
   const name = (prompt('Name for the copy:', current().name + ' copy') || '').trim();
   if (!name) return;
   const id = JA_PROFILES.uid();
-  store.profiles[id] = { name, data: JSON.parse(JSON.stringify(collectForm())) };
+  store.profiles[id] = { name, data: JSON.parse(JSON.stringify(JA_PROFILES.split(collectForm(), store.shared).profileData)) };
   await persist();
   await switchTo(id);
   flash('Copied (unsaved edits included)');
@@ -340,7 +391,7 @@ document.getElementById('pDel').onclick = async () => {
 
 // ---- Export / import (backup, or move to a new install) ----
 document.getElementById('pExport').onclick = () => {
-  const body = JSON.stringify({ app: 'job-autofill', version: 1, profiles: store.profiles }, null, 2);
+  const body = JSON.stringify({ app: 'job-autofill', version: 2, profiles: store.profiles, shared: store.shared }, null, 2);
   const url = URL.createObjectURL(new Blob([body], { type: 'application/json' }));
   Object.assign(document.createElement('a'), { href: url, download: 'job-autofill-profiles.json' }).click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -367,6 +418,8 @@ importInput.onchange = async () => {
       last = JA_PROFILES.uid();
       store.profiles[last] = { name, data: p.data };
     }
+    const hasShared = Object.keys(store.shared.data).length > 0;
+    if (json.shared && json.shared.data && !hasShared) store.shared = { groups: { ...store.shared.groups, ...json.shared.groups }, data: json.shared.data };
     await persist();
     await switchTo(last);
     flash(`Imported ${incoming.length} profile${incoming.length > 1 ? 's' : ''}`);
@@ -375,17 +428,22 @@ importInput.onchange = async () => {
   }
 };
 
+async function save_() {
+  const { profileData, sharedData } = JA_PROFILES.split(collectForm(), store.shared);
+  current().data = profileData;
+  Object.assign(store.shared.data, sharedData);
+  await persist();
+  populateForm(effective()); // re-show normalized values (full state name etc.)
+}
+
 document.getElementById('save').onclick = async (e) => {
   e.preventDefault();
-  const data = collectForm();
-  current().data = data;
-  await persist();
-  populateForm(data); // re-show normalized values (full state name etc.)
+  await save_();
   flash('Saved');
 };
 
 (async () => {
   store = await JA_PROFILES.load();
   renderBar();
-  populateForm(current().data);
+  populateForm(effective());
 })();

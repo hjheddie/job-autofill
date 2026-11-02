@@ -1318,7 +1318,7 @@
 
   window.__jobAutofillLearn = async function () {
     const store = await window.JA_PROFILES.load();
-    const profile = store.profiles[store.activeProfileId].data;
+    const profile = window.JA_PROFILES.merge(store.profiles[store.activeProfileId].data, store.shared);
     const qa = profile.customQA || (profile.customQA = []);
     scanHomeFields(collect(document, []));
     const learned = [];
@@ -1362,7 +1362,7 @@
       remember(q, labelText(picked) || picked.value);
     }
 
-    await window.JA_PROFILES.save(store.profiles, store.activeProfileId);
+    await window.JA_PROFILES.saveKeys({ customQA: qa });
     return learned;
   };
 

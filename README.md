@@ -21,6 +21,10 @@ Keep the folder somewhere permanent: Chrome loads an unpacked extension directly
 ## Multiple profiles
 Create, duplicate, rename and delete profiles on the options page (e.g. one per role type). The popup has a profile picker; the selected profile is the one that gets filled. An existing single profile is migrated automatically to "Default".
 
+### Shared and per-profile settings
+
+Every section on the profile page has a **same for all profiles** switch. A shared section is edited once and used by every profile; a per-profile section is kept separately. Out of the box, shared: contact, links, standard answers, work authorization, self-identification, education, languages, employers and saved answers. Per profile: work experience, skills, job preferences (salary, start date) and the resume. Change any of them with the switch. Turning sharing on makes what is shown the shared copy (other profiles keep their old values stored but stop using them); turning it off gives every profile a copy of the shared values. Existing installs are upgraded automatically from the values they already have. "Remember my answers" saves into whichever place the Saved answers section uses, and Export/Import include the shared settings.
+
 ## Skills
 Add skills (comma or line separated) to a profile. Plain "Skills" text boxes get them as a comma-separated list; search-and-pick boxes (Workday) get each skill typed and the matching suggestion chosen. Skills the site doesn't offer are listed under "Needs your attention".
 

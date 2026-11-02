@@ -384,6 +384,40 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('real SuccessFactors layout: first job row filled', d.getElementById('f127_1_1').value, 'Co1');
   }
 
+  // ---------- Shared vs per-profile settings ----------
+  {
+    const mem = {};
+    const chromeStub = { storage: { local: {
+      get: async (keys) => Object.fromEntries(keys.filter((k) => k in mem).map((k) => [k, JSON.parse(JSON.stringify(mem[k]))])),
+      set: async (o) => { for (const [k, v] of Object.entries(o)) mem[k] = JSON.parse(JSON.stringify(v)); },
+      remove: async (k) => { delete mem[k]; },
+    } } };
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'profiles.js'), 'utf8');
+    const g = { chrome: chromeStub };
+    new Function('chrome', 'globalThis', src + '\nreturn 0;').call(g, chromeStub, g);
+    const P = g.JA_PROFILES;
+    // an existing install: two profiles, the first lacks a phone that the second has
+    mem.profiles = {
+      a: { name: 'A', data: { firstName: 'Jae', email: 'a@x.com', salary: '90000', workExperience: [{ company: 'Acme' }] } },
+      b: { name: 'B', data: { firstName: 'Jay', phone: '555', salary: '70000', education: [{ school: 'UIUC' }] } },
+    };
+    mem.activeProfileId = 'a';
+    const store = await P.load();
+    check('shared: existing values move into the shared copy (active profile first, gaps filled from others)',
+      [store.shared.data.firstName, store.shared.data.phone, store.shared.data.email, JSON.stringify(store.shared.data.education)], ['Jae', '555', 'a@x.com', '[{"school":"UIUC"}]']);
+    check('shared: per-profile groups stay per profile', [store.shared.data.salary, store.shared.data.workExperience], [undefined, undefined]);
+    mem.activeProfileId = 'b';
+    const b = await P.active();
+    check('shared: the other profile sees the shared name/email, but its own salary', [b.firstName, b.email, b.salary], ['Jae', 'a@x.com', '70000']);
+    await P.saveKeys({ email: 'new@x.com', salary: '100000', customQA: [{ q: 'q', a: 'a' }] });
+    mem.activeProfileId = 'a';
+    const a = await P.active();
+    check('shared: a shared change reaches every profile, a per-profile one does not',
+      [a.email, a.salary, JSON.stringify(a.customQA)], ['new@x.com', '90000', '[{"q":"q","a":"a"}]']);
+    const sp = P.split({ firstName: 'X', salary: '1', custom: 'k' }, (await P.load()).shared);
+    check('shared: split routes each key', [Object.keys(sp.sharedData).join(), Object.keys(sp.profileData).sort().join()], ['firstName', 'custom,salary']);
+  }
+
   // ---------- Page structure copy: keeps labels and options, never typed values ----------
   {
     const w = loadPage('<form><h3>Contact</h3><label for=e>Email</label><input id=e value="jane.doe@example.com"><select id=s><option>One</option></select><p>Call 2175551234</p><script>var s1=1;/*secret*/</script></form>', {});

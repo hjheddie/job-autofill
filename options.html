@@ -12,6 +12,8 @@
   button { padding: 9px 18px; font-size: 14px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
   #status { margin-left: 10px; color: #15803d; }
   small { color: #777; }
+  label.share { display: inline; float: right; margin: 0; font-size: 12px; font-weight: normal; color: #555; }
+  label.share input { display: inline; width: auto; margin: 0 4px 0 0; }
   #bar { display: flex; gap: 6px; align-items: center; margin: 10px 0; }
   #bar select { width: auto; flex: 1; margin: 0; }
   #bar button { margin: 0; }
@@ -35,6 +37,7 @@
     <button type="button" id="pImport" class="secondary">Import profiles</button>
     <input type="file" id="pImportFile" accept=".json,application/json" hidden>
   </div>
+  <small id="shareNote"></small><br>
   <small>Stored only in this browser (chrome.storage.local). Nothing is sent anywhere.</small>
   <form id="f"></form>
   <p><button id="save">Save</button><span id="status"></span></p>
