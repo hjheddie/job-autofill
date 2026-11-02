@@ -357,7 +357,7 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
   // ---------- SuccessFactors accordion as seen on a real application (closed sections, div "Add" buttons) ----------
   {
     const sec = (id, title, body) => `<div id="${id}:section"><h2 id="${id}:headerLabel"><button id="${id}:topBar" class="topBar" aria-expanded="false"><span aria-hidden="true" aria-expanded="false"></span><span>${title}</span></button></h2>
-      <div id="${id}:sectionContent" hidden><div><div>There are no items in this section.</div></div><div class="btnRowWrapper"><div role="button" title="Add new row" id="${id}:_addRowBtn"><span class="addRowIcon"></span>Add<span class="hiddenAriaContent" aria-label="${title}"></span></div></div>${body}</div></div>`;
+      <div id="${id}:sectionContent" hidden><div><div>There are no items in this section.</div></div><div class="btnRowWrapper"><div role="button" title="Add new row" id="${id}:_addRowBtn"><span class="addRowIcon"></span> Add<span class="hiddenAriaContent" aria-label="${title}"></span></div></div>${body}</div></div>`;
     const html = sec(127, 'Please provide the 3 most recent employers', '<div id="rows127"></div>') + sec(129, 'Please provide your formal education', '<div id="rows129"></div>')
       + sec(131, 'Certifications/Licenses', '') + sec(135, 'Language Skills', '<div id="rows135"></div>');
     const w = loadPage(html, {

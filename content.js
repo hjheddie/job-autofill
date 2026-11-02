@@ -1181,6 +1181,10 @@
 
   const isAfter = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); // b comes after a
 
+  // Icon fonts put a private-use glyph in front of the word, so it is dropped before comparing.
+  const addLabel = (b) => norm((itemText(b) || '').replace(/[\uE000-\uF8FF]/g, '')) || norm(b.getAttribute('aria-label') || b.title || '');
+  const isAddButton = (b) => ADD_BUTTON.test(addLabel(b));
+
   // Section titles on the page: headings and accordion headers, however they are worded.
   const TITLE_SEL = 'h1, h2, h3, h4, h5, h6, [role=heading], legend, [aria-expanded]';
   const KIND_WORD = { work: /work|employ|experience/, edu: /educat|school/, lang: /language/ };
@@ -1198,8 +1202,7 @@
   function sectionInfo(def, all) {
     const titles = sectionTitles();
     let mine = titles.filter((n) => KIND_WORD[def.kind].test(norm(itemText(n))));
-    const buttons = [...document.querySelectorAll('a, button, [role=button]')].filter((b) => shown(b) && !b.disabled
-      && ADD_BUTTON.test(norm(itemText(b) || b.getAttribute('aria-label') || b.title || '')));
+    const buttons = [...document.querySelectorAll('a, button, [role=button]')].filter((b) => shown(b) && !b.disabled && isAddButton(b));
     let best = null;
     for (const h of mine) {
       const next = titles.filter((n) => isAfter(h, n) && !h.contains(n) && !n.contains(h))
