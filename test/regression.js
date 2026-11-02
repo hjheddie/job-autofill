@@ -354,6 +354,36 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('sections: field report lists them', report.sections.map((x) => [x.section, x.rows, x.hasAddButton]), [['work experience', 3, true], ['education', 2, true], ['languages', 2, true]]);
   }
 
+  // ---------- SuccessFactors accordion as seen on a real application (closed sections, div "Add" buttons) ----------
+  {
+    const sec = (id, title, body) => `<div id="${id}:section"><h2 id="${id}:headerLabel"><button id="${id}:topBar" class="topBar" aria-expanded="false"><span aria-hidden="true" aria-expanded="false"></span><span>${title}</span></button></h2>
+      <div id="${id}:sectionContent" hidden><div><div>There are no items in this section.</div></div><div class="btnRowWrapper"><div role="button" title="Add new row" id="${id}:_addRowBtn"><span class="addRowIcon"></span>Add<span class="hiddenAriaContent" aria-label="${title}"></span></div></div>${body}</div></div>`;
+    const html = sec(127, 'Please provide the 3 most recent employers', '<div id="rows127"></div>') + sec(129, 'Please provide your formal education', '<div id="rows129"></div>')
+      + sec(131, 'Certifications/Licenses', '') + sec(135, 'Language Skills', '<div id="rows135"></div>');
+    const w = loadPage(html, {
+      workExperience: [1, 2, 3, 4].map((n) => ({ title: 'T' + n, company: 'Co' + n, fromMonth: '01', fromYear: '2020' })),
+      education: [{ school: 'UIUC', field: 'Mechanical Engineering', fromMonth: '08', fromYear: '2023' }],
+      languages: [{ language: 'English', proficiency: 'Native' }] });
+    const d = w.document;
+    const rows = { 127: ['From Date', 'Company Name', 'Job Title'], 129: ['School', 'Major'], 135: ['Language', 'Proficiency'] };
+    const added = { 127: 0, 129: 0, 135: 0, 131: 0 };
+    for (const id of [127, 129, 131, 135]) {
+      d.getElementById(`${id}:topBar`).addEventListener('click', () => {
+        const open = d.getElementById(`${id}:topBar`).getAttribute('aria-expanded') === 'true';
+        d.getElementById(`${id}:topBar`).setAttribute('aria-expanded', String(!open));
+        d.getElementById(`${id}:sectionContent`).hidden = open;
+      });
+      d.getElementById(`${id}:_addRowBtn`).addEventListener('click', () => {
+        added[id]++;
+        if (rows[id]) d.getElementById('rows' + id).insertAdjacentHTML('beforeend', rows[id].map((l, i) => `<div><label for="f${id}_${added[id]}_${i}">${l}</label><input id="f${id}_${added[id]}_${i}"></div>`).join(''));
+      });
+    }
+    await w.__jobAutofill();
+    check('real SuccessFactors layout: sections opened, rows added (jobs capped at 3), certifications untouched',
+      [added[127], added[129], added[135], added[131]], [3, 1, 1, 0]);
+    check('real SuccessFactors layout: first job row filled', d.getElementById('f127_1_1').value, 'Co1');
+  }
+
   // ---------- Page structure copy: keeps labels and options, never typed values ----------
   {
     const w = loadPage('<form><h3>Contact</h3><label for=e>Email</label><input id=e value="jane.doe@example.com"><select id=s><option>One</option></select><p>Call 2175551234</p><script>var s1=1;/*secret*/</script></form>', {});

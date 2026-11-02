@@ -17,6 +17,7 @@
     ['highestDiscipline', /discipline.*highest|highest.*(discipline|field of study|major)/],
     ['highestEducation', /highest (level of )?(education|degree)/],
     ['eduStart', /^start date\b/],
+    ['availableDate', /available to start|start work|date.*available|earliest start|when can you start/],
     ['degreeCompleted', /degree (been )?completed|completed (this|the) degree|degree completed/],
     ['over18', /at least 18|18 years|over 18|eighteen/],
     ['restrictive', /restrictive covenant|non-?compete|confidentiality agreement|contractual obligation/],
@@ -183,7 +184,7 @@
     return AUTOCOMPLETE[ac] || null;
   }
 
-  const EDU_KEYS = new Set(['school', 'degree', 'major', 'gpa', 'graduationDate', 'expectedGraduation', 'eduStart', 'degreeCompleted']);
+  const EDU_KEYS = new Set(['school', 'degree', 'major', 'gpa', 'graduationDate', 'expectedGraduation', 'eduStart', 'degreeCompleted', 'availableDate']);
   const DEGREE_ORDER = ['High School', "Associate's", "Bachelor's", "Master's", 'Doctorate (PhD)'];
   // The highest degree whose graduation date has passed (null while you are still studying for all of them).
   function highestDone(p) {
@@ -1094,7 +1095,7 @@
         else if (isListbox) ok = await fillListbox(el, answers);
         else if (isSelect) ok = fillSelect(el, answers);
         else if (isCombo) ok = await fillCombobox(el, answers);
-        else if (key === 'graduationDate' || key === 'expectedGraduation' || key === 'eduStart') ok = await typeFormatted(el, answer);
+        else if (key === 'graduationDate' || key === 'expectedGraduation' || key === 'eduStart' || key === 'availableDate') ok = await typeFormatted(el, answer);
         else { setNative(el, answer); ok = true; }
 
         if (key === 'languageName') skipLangRatings = !ok;
@@ -1197,7 +1198,6 @@
   function sectionInfo(def, all) {
     const titles = sectionTitles();
     let mine = titles.filter((n) => KIND_WORD[def.kind].test(norm(itemText(n))));
-    if (!mine.length && def.kind === 'work') mine = titles.filter((n) => /^profile information$/.test(norm(itemText(n))));
     const buttons = [...document.querySelectorAll('a, button, [role=button]')].filter((b) => shown(b) && !b.disabled
       && ADD_BUTTON.test(norm(itemText(b) || b.getAttribute('aria-label') || b.title || '')));
     let best = null;
@@ -1207,7 +1207,8 @@
       const within = (n) => isAfter(h, n) && (!next || isAfter(n, next));
       const add = buttons.find((b) => within(b) && !h.contains(b));
       const inRange = all.filter((el) => within(hostOf(el)));
-      const info = { heading: h, add: add || null, rows: inRange.filter((el) => def.marker.test(labelText(el))).length, fields: inRange.length };
+      const limit = +((norm(itemText(h)).match(/(\d+) most recent/) || [])[1]) || 0;
+      const info = { heading: h, limit, add: add || null, rows: inRange.filter((el) => def.marker.test(labelText(el))).length, fields: inRange.length };
       if (!best || (add && !best.add)) best = info;
     }
     return best;
@@ -1234,8 +1235,10 @@
   // Click "Add" until each section has as many rows as you have saved entries (never more than the cap).
   async function ensureRows(p, filled) {
     for (const def of SF_SECTIONS) {
-      const want = Math.min((p[def.list] || []).length, def.cap);
+      let want = Math.min((p[def.list] || []).length, def.cap);
       if (!want) continue;
+      const limit = (sectionInfo(def, collect(document, [])) || {}).limit; // "3 most recent employers"
+      if (limit) want = Math.min(want, limit);
       if (sectionRoots(KINDS[def.kind]).length) continue; // Workday-style numbered blocks are added by fillSections
       for (let guard = 0; guard < want; guard++) {
         const info = sectionInfo(def, collect(document, []));

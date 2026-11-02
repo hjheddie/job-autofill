@@ -16,6 +16,7 @@ const SECTIONS = [
   ]],
   ['Other', [
     ['salary', 'Salary expectation'],
+    ['availableDate', 'Available start date (MM/DD/YYYY)'],
     ['over18', 'At least 18 years old?', YESNO],
     ['restrictive', 'Bound by non-compete / restrictive agreements?', YESNO],
     ['previousEmployee', 'Previously employed by the company? (blank = answer each time)', YESNO],
