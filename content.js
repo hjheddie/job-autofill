@@ -700,9 +700,37 @@
     }
     if (!target) return false;
     t.picked = itemText(target).slice(0, 40);
-    clickLike(target);
-    await sleep(400);
-    return true;
+    return await tickResult(el, target, t);
+  }
+
+  // Results of a multi-select search are checkbox rows: tick the checkbox itself, and check it took
+  // ("N items selected", a chip, or the box being on) before trying anything else, so it is never toggled twice.
+  const optionRoot = (n) => n.closest('[role=option], [data-automation-id="promptOption"], [role=menuitem], [role=menuitemcheckbox], li') || n;
+  const checkboxOf = (row) => row.querySelector('input[type=checkbox], [role=checkbox], [data-automation-id*="checkbox" i]');
+  const isOn = (n) => !!n && (n.checked === true || ['aria-checked', 'aria-selected'].some((a) => n.getAttribute(a) === 'true'));
+  function selectedInfo(el) {
+    const box = el.closest('[data-automation-id*="multiSelect" i]') || document;
+    const note = box.querySelector('[data-automation-id="promptAriaInstruction"]');
+    const m = ((note && note.textContent) || '').match(/(\d+)\s+items?\s+selected/i);
+    const chips = box.querySelectorAll('[data-automation-id="selectedItem"]').length;
+    return { count: Math.max(m ? +m[1] : 0, chips), known: !!(m || chips || note) };
+  }
+  async function tickResult(el, target, t) {
+    const row = optionRoot(target);
+    const cb = checkboxOf(row);
+    const base = selectedInfo(el);
+    const tries = [cb, row, target].filter((n, i, a) => n && a.indexOf(n) === i);
+    t.ticked = [];
+    for (const node of tries) {
+      clickLike(node);
+      await sleep(450);
+      const now = selectedInfo(el);
+      const worked = now.count > base.count || isOn(cb) || isOn(row);
+      t.ticked.push({ clicked: describe(node), worked, count: now.count });
+      if (worked) return true;
+      if (!base.known && !cb) return true; // nothing on the page can confirm it, assume the click counted
+    }
+    return false;
   }
 
   async function fillSkills(el, list) {

@@ -377,6 +377,35 @@ const plain = (id, label, extra = '') => `<div><label for="${id}">${label}</labe
     check('workday field of study: picked from the search results', [...d.getElementById('chips').children].map((c) => c.textContent), ['Mechanical Engineering']);
   }
 
+  // ---------- Workday skills whose results are checkbox rows (only the checkbox toggles, "N items selected") ----------
+  {
+    const w = loadPage('<div data-automation-id="formField-skills"><label for=sk>Type to Add Skills</label><div data-automation-id="multiSelectContainer"><input id=sk placeholder="Search"><div data-automation-id="promptAriaInstruction" id=count>0 items selected</div></div><div id=host></div></div>', { skills: ['Python', 'MATLAB'] });
+    const d = w.document;
+    const inp = d.getElementById('sk');
+    const picked = new Set();
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      setTimeout(() => {
+        const v = inp.value.toLowerCase();
+        const host = d.getElementById('host');
+        host.innerHTML = '';
+        ['Python', 'MATLAB', 'Python Scripting'].filter((c) => v && c.toLowerCase().includes(v)).forEach((name) => {
+          const row = d.createElement('div');
+          row.setAttribute('role', 'option');
+          row.innerHTML = `<input type="checkbox"><span>${name}</span>`;
+          row.querySelector('input').addEventListener('click', (ev) => { // only the box toggles
+            ev.stopPropagation();
+            if (picked.has(name)) picked.delete(name); else picked.add(name);
+            d.getElementById('count').textContent = `${picked.size} items selected`;
+          });
+          host.append(row);
+        });
+      }, 300);
+    });
+    await w.__jobAutofill();
+    check('workday skills: the checkbox is ticked, once, for exactly the skill', [...picked].sort(), ['MATLAB', 'Python']);
+  }
+
   // ---------- "Have you worked here?" / "Does a relative work here?" ----------
   {
     const YN = '<option>No Selection</option><option>Yes</option><option>No</option>';
